@@ -12,12 +12,11 @@ import json
 from typing import Any, Dict, Tuple
 
 import pytest
+from coreason_veritas.exceptions import AssetTamperedError
+from coreason_veritas.gatekeeper import SignatureValidator
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
-
-from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.gatekeeper import SignatureValidator
 
 
 @pytest.fixture  # type: ignore[misc]

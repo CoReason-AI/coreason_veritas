@@ -12,14 +12,6 @@
 coreason_veritas is the non-negotiable governance layer of the CoReason platform
 """
 
-import os
-import sys
-
-from loguru import logger
-
-logger.remove()
-logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
-
 __version__ = "0.1.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
