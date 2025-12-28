@@ -9,6 +9,7 @@
 *   **[Operations Manual](operations.md)**: A guide for Auditors and Operators on reading the Immutable Execution Record (IER) and OpenTelemetry traces.
 *   **[Cookbook](cookbook.md)**: Code examples and integration patterns (FastAPI, Nested Calls, etc.).
 *   **[API Reference](api.md)**: Detailed technical documentation for the Python API.
+*   **[Package Specification](specification.md)**: The complete technical specification and design document.
 *   **[Contributing](contributing.md)**: Guidelines for developers who want to contribute to the codebase.
 
 ## Quick Start

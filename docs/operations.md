@@ -2,6 +2,28 @@
 
 This guide is for System Operators, Auditors, and Compliance Officers responsible for monitoring the `coreason_veritas` runtime.
 
+## Deployment & Configuration
+
+### Deployment Mode A: Library Injection
+
+*   **Integration:** Used in `services.project_lock` and `integrations.asset_registry`.
+*   **Lifecycle:** Auto-initializes `IERLogger` in `__init__.py`.
+
+### Deployment Mode B: Gateway Proxy
+
+For environments where Python library injection is not feasible, `coreason_veritas` operates as a standalone Gateway Proxy.
+
+*   **Module:** `src/coreason_veritas/main.py`
+*   **Framework:** FastAPI + Uvicorn.
+*   **Endpoints:** Exposes `POST /v1/chat/completions`.
+*   **Behavior:**
+    1.  **Anchor:** Intercepts request -> Sanitizes config (Temp=0, Seed=42).
+    2.  **Proxy:** Forwards to LLM Provider -> Returns response.
+*   **Configuration:**
+    *   `VERITAS_HOST`: Host to bind (default: `0.0.0.0`).
+    *   `VERITAS_PORT`: Port to bind (default: `8080`).
+    *   `LLM_PROVIDER_URL`: Upstream LLM provider URL.
+
 ## The Immutable Execution Record (IER)
 
 The IER is a structured log entry (OpenTelemetry Span) that serves as the legal proof of execution.
