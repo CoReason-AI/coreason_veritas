@@ -14,14 +14,14 @@ import os
 from typing import Dict, Generator
 
 from loguru import logger
-from opentelemetry import trace, _logs
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry import _logs, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
 from coreason_veritas.anchor import is_anchor_active
 
@@ -41,11 +41,13 @@ class IERLogger:
                           Defaults to "coreason-veritas" if not provided.
         """
         # 1. Resource Attributes: Generic metadata for client portability
-        resource = Resource.create({
-            "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
-            "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
-            "host.name": os.uname().nodename
-        })
+        resource = Resource.create(
+            {
+                "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
+                "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
+                "host.name": os.uname().nodename,
+            }
+        )
 
         # 2. Setup Tracing (for AI workflow logic)
         tp = TracerProvider(resource=resource)
@@ -73,11 +75,7 @@ class IERLogger:
             version: The version string of the package.
         """
         self.logger.info(
-            "Veritas Engine Initialized",
-            extra={
-                "co.veritas.version": version,
-                "co.governance.status": "active"
-            }
+            "Veritas Engine Initialized", extra={"co.veritas.version": version, "co.governance.status": "active"}
         )
 
     @contextlib.contextmanager

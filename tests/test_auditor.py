@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 from typing import Generator
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -49,20 +49,28 @@ def mock_tracer(mock_tracer_provider: MagicMock) -> Generator[MagicMock, None, N
 
 @pytest.fixture  # type: ignore[misc]
 def mock_exporters() -> Generator[None, None, None]:
-    with patch("coreason_veritas.auditor.OTLPSpanExporter"), \
-         patch("coreason_veritas.auditor.OTLPLogExporter"), \
-         patch("coreason_veritas.auditor.BatchSpanProcessor"), \
-         patch("coreason_veritas.auditor.BatchLogRecordProcessor"), \
-         patch("coreason_veritas.auditor.LoggingHandler"):
+    with (
+        patch("coreason_veritas.auditor.OTLPSpanExporter"),
+        patch("coreason_veritas.auditor.OTLPLogExporter"),
+        patch("coreason_veritas.auditor.BatchSpanProcessor"),
+        patch("coreason_veritas.auditor.BatchLogRecordProcessor"),
+        patch("coreason_veritas.auditor.LoggingHandler"),
+    ):
         yield
 
 
-def test_initialization(mock_otlp_env: None, mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock, mock_exporters: None) -> None:
+def test_initialization(
+    mock_otlp_env: None,
+    mock_tracer_provider: MagicMock,
+    mock_logger_provider: MagicMock,
+    mock_exporters: None,
+) -> None:
     """Test that IERLogger initializes providers and exporters."""
-    with patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp, \
-         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp:
-
-        logger = IERLogger()
+    with (
+        patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
+        patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
+    ):
+        IERLogger()
 
         # Verify TracerProvider setup
         mock_tracer_provider.assert_called_once()
@@ -84,11 +92,7 @@ def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
     logger_instance.emit_handshake(version)
 
     logger_instance.logger.info.assert_called_once_with(
-        "Veritas Engine Initialized",
-        extra={
-            "co.veritas.version": version,
-            "co.governance.status": "active"
-        }
+        "Veritas Engine Initialized", extra={"co.veritas.version": version, "co.governance.status": "active"}
     )
 
 
