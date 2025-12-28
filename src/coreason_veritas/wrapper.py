@@ -9,8 +9,9 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
+import inspect
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
@@ -39,8 +40,8 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+
+        def _perform_gatekeeping(kwargs: Dict[str, Any]) -> Dict[str, str]:
             # 1. Gatekeeper Check
             sig = kwargs.get(signature_arg)
             asset = kwargs.get(asset_id_arg)
@@ -57,19 +58,35 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
             public_key = get_public_key_from_store()
             SignatureValidator(public_key).verify_asset(asset, sig)
 
-            # 2. Start Audit Span
-            attributes = {
+            # Prepare attributes for Auditor
+            return {
                 "asset": str(asset),  # Legacy support from spec example
                 "co.asset_id": str(asset),
                 "co.user_id": str(user_id),
                 "co.srb_sig": str(sig),
             }
 
-            with IERLogger().start_governed_span(func.__name__, attributes):
-                # 3. Anchor Context (Context Manager)
-                with DeterminismInterceptor().scope():
-                    return await func(*args, **kwargs)
+        if inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                attributes = _perform_gatekeeping(kwargs)
 
-        return wrapper
+                # 2. Start Audit Span
+                with IERLogger().start_governed_span(func.__name__, attributes):
+                    # 3. Anchor Context (Context Manager)
+                    with DeterminismInterceptor().scope():
+                        return await func(*args, **kwargs)
+            return wrapper
+        else:
+            @wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                attributes = _perform_gatekeeping(kwargs)
+
+                # 2. Start Audit Span
+                with IERLogger().start_governed_span(func.__name__, attributes):
+                    # 3. Anchor Context (Context Manager)
+                    with DeterminismInterceptor().scope():
+                        return func(*args, **kwargs)
+            return wrapper
 
     return decorator

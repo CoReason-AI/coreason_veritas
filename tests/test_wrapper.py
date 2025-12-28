@@ -11,6 +11,7 @@
 import asyncio
 import json
 import os
+import inspect
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
@@ -332,3 +333,37 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
 
             # Verify spans: 3 (recursive) + 1 (initial) = 4 calls
             assert mock_tracer.start_as_current_span.call_count == 4
+
+
+def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test that governed_execution supports synchronous functions.
+    This test runs synchronously (no async def).
+    """
+    private_key, public_key_pem = key_pair
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        payload = {"data": "sync"}
+        signature = sign_payload(payload, private_key)
+
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_span = MagicMock()
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            def sync_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                # Ensure Anchor is active
+                assert is_anchor_active() is True
+                return "sync_result"
+
+            # Verify that the wrapper maintained it as sync (not coroutine)
+            assert not inspect.iscoroutinefunction(sync_function)
+
+            # Call synchronously
+            result = sync_function(spec=payload, sig=signature, user="user-sync")
+            assert result == "sync_result"
+
+            # Verify Auditor
+            mock_tracer.start_as_current_span.assert_called_once()
