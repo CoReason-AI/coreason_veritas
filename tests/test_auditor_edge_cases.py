@@ -41,13 +41,13 @@ def test_idempotency_multiple_inits(clean_logger: logging.Logger) -> None:
     ):
         # First Init
         ier1 = IERLogger()
-        assert len(ier1.logger.handlers) == 1
-        assert isinstance(ier1.logger.handlers[0], LoggingHandler)
+        assert len(ier1.otel_bridge_logger.handlers) == 1
+        assert isinstance(ier1.otel_bridge_logger.handlers[0], LoggingHandler)
 
         # Second Init
         ier2 = IERLogger()
-        assert len(ier2.logger.handlers) == 1
-        assert ier2.logger.handlers[0] is ier1.logger.handlers[0]
+        assert len(ier2.otel_bridge_logger.handlers) == 1
+        assert ier2.otel_bridge_logger.handlers[0] is ier1.otel_bridge_logger.handlers[0]
 
 
 def test_idempotency_pre_existing_handler(clean_logger: logging.Logger) -> None:
@@ -68,8 +68,8 @@ def test_idempotency_pre_existing_handler(clean_logger: logging.Logger) -> None:
         ier = IERLogger()
 
         # Should still be 1
-        assert len(ier.logger.handlers) == 1
-        assert ier.logger.handlers[0] is existing_handler
+        assert len(ier.otel_bridge_logger.handlers) == 1
+        assert ier.otel_bridge_logger.handlers[0] is existing_handler
 
 
 def test_idempotency_mock_handler_conflict(clean_logger: logging.Logger) -> None:
@@ -91,8 +91,8 @@ def test_idempotency_mock_handler_conflict(clean_logger: logging.Logger) -> None
     ):
         ier = IERLogger()
         # Should have added a real handler because generic_mock is not recognized as LoggingHandler
-        assert len(ier.logger.handlers) == 2
-        assert isinstance(ier.logger.handlers[1], LoggingHandler)
+        assert len(ier.otel_bridge_logger.handlers) == 2
+        assert isinstance(ier.otel_bridge_logger.handlers[1], LoggingHandler)
 
     # Cleanup for Case 2
     clean_logger.handlers = []
@@ -110,8 +110,8 @@ def test_idempotency_mock_handler_conflict(clean_logger: logging.Logger) -> None
     ):
         ier = IERLogger()
         # Should NOT add new handler because it thinks one exists
-        assert len(ier.logger.handlers) == 1
-        assert ier.logger.handlers[0] is masquerade_mock
+        assert len(ier.otel_bridge_logger.handlers) == 1
+        assert ier.otel_bridge_logger.handlers[0] is masquerade_mock
 
 
 def test_handshake_data_integrity(clean_logger: Any) -> None:
@@ -127,7 +127,7 @@ def test_handshake_data_integrity(clean_logger: Any) -> None:
         ier = IERLogger()
 
         # Patch the logger to capture the log call
-        with patch.object(ier.logger, "info") as mock_info:
+        with patch.object(ier.otel_bridge_logger, "info") as mock_info:
             version = "9.9.9-test"
             ier.emit_handshake(version)
 
