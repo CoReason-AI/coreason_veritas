@@ -194,7 +194,8 @@ async def test_generator_interruption_cleanup(key_pair: Tuple[RSAPrivateKey, str
             MockIERLogger.return_value.start_governed_span.return_value = mock_span_ctx
 
             mock_anchor_ctx = MagicMock()
-            MockAnchor.return_value.scope.return_value = mock_anchor_ctx
+            # Updated to mock the static method, not the instance method
+            MockAnchor.scope.return_value = mock_anchor_ctx
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def stream_data(spec: Dict[str, Any], sig: str, user: str) -> AsyncGenerator[int, None]:
