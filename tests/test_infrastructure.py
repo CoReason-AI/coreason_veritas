@@ -9,10 +9,11 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import pytest
-from coreason_veritas.exceptions import AssetTamperedError
 from cryptography.hazmat.primitives import hashes
 from opentelemetry import trace
 from pydantic import BaseModel
+
+from coreason_veritas.exceptions import AssetTamperedError
 
 
 def test_dependencies_installed() -> None:
