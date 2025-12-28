@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
+from coreason_veritas.auditor import IERLogger
+
 
 @pytest.fixture(autouse=True)  # type: ignore[misc]
 def mock_global_exporters() -> Generator[None, None, None]:
@@ -28,3 +30,17 @@ def mock_global_exporters() -> Generator[None, None, None]:
         patch("coreason_veritas.auditor.BatchLogRecordProcessor"),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)  # type: ignore[misc]
+def reset_singleton() -> Generator[None, None, None]:
+    """
+    Reset the IERLogger singleton instance before each test.
+    This ensures that each test gets a fresh start and can inject its own mocks
+    into the IERLogger initialization (e.g. for trace providers).
+    """
+    IERLogger._instance = None
+    IERLogger._initialized = False
+    yield
+    IERLogger._instance = None
+    IERLogger._initialized = False

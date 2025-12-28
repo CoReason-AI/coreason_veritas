@@ -39,9 +39,6 @@ def mock_logger_provider() -> Generator[MagicMock, None, None]:
 
 @pytest.fixture  # type: ignore[misc]
 def mock_tracer(mock_tracer_provider: MagicMock) -> Generator[MagicMock, None, None]:
-    # Trace.get_tracer is called inside __init__ using the provider
-    # But wait, implementation calls trace.set_tracer_provider(tp) then trace.get_tracer
-    # We should mock trace.get_tracer directly or ensure logic flow works
     with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
         mock_tracer_instance = MagicMock()
         mock_get_tracer.return_value = mock_tracer_instance
@@ -82,17 +79,41 @@ def test_initialization(
         mock_set_lp.assert_called_once()
 
 
+def test_ier_logger_singleton(
+    mock_otlp_env: None,
+    mock_tracer_provider: MagicMock,
+    mock_logger_provider: MagicMock,
+    mock_exporters: None,
+) -> None:
+    """Test that IERLogger is a singleton and initializes only once."""
+    with (
+        patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
+        patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
+    ):
+        logger1 = IERLogger()
+        logger2 = IERLogger()
+
+        # Check identity
+        assert logger1 is logger2
+
+        # Check initialization called only once
+        mock_tracer_provider.assert_called_once()
+        mock_set_tp.assert_called_once()
+        mock_logger_provider.assert_called_once()
+        mock_set_lp.assert_called_once()
+
+
 def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test emit_handshake logs correct message."""
     logger_instance = IERLogger("test-service")
 
     # Mock the internal logger
-    logger_instance.logger = MagicMock()
+    logger_instance.otel_bridge_logger = MagicMock()
 
     version = "1.0.0"
     logger_instance.emit_handshake(version)
 
-    logger_instance.logger.info.assert_called_once_with(
+    logger_instance.otel_bridge_logger.info.assert_called_once_with(
         "Veritas Engine Initialized", extra={"co.veritas.version": version, "co.governance.status": "active"}
     )
 
@@ -262,5 +283,5 @@ def test_logging_handler_attached(mock_exporters: None, mock_logger_provider: Ma
         logger_instance = IERLogger("test-service")
 
         # Verify handler is attached to the internal logger
-        assert len(logger_instance.logger.handlers) > 0
-        assert isinstance(logger_instance.logger.handlers[0], logging.Handler)
+        assert len(logger_instance.otel_bridge_logger.handlers) > 0
+        assert isinstance(logger_instance.otel_bridge_logger.handlers[0], logging.Handler)
