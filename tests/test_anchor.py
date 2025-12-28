@@ -1,4 +1,3 @@
-import pytest
 # Copyright (c) 2025 CoReason, Inc.
 #
 # This software is proprietary and dual-licensed.
@@ -8,8 +7,11 @@ import pytest
 # Commercial use beyond a 30-day trial requires a separate license.
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
-
+import threading
+import time
 from typing import Any, Dict
+
+import pytest
 
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 
@@ -92,6 +94,7 @@ def test_scope_exception() -> None:
 
     assert is_anchor_active() is False
 
+
 def test_enforce_config_invalid_types() -> None:
     """Test enforce_config behavior when config contains invalid types."""
     interceptor = DeterminismInterceptor()
@@ -126,9 +129,6 @@ def test_enforce_config_none_input() -> None:
         interceptor.enforce_config(None)  # type: ignore
 
 
-import threading
-import time
-
 def test_scope_threading() -> None:
     """
     Test that contextvars work correctly across threads.
@@ -141,11 +141,11 @@ def test_scope_threading() -> None:
 
     results = {"thread_1": False, "thread_2": False}
 
-    def thread_task(name: str, enable_scope: bool):
+    def thread_task(name: str, enable_scope: bool) -> None:
         if enable_scope:
             with interceptor.scope():
                 # Signal we are inside scope
-                event.wait() # Wait for other thread
+                event.wait()  # Wait for other thread
                 results[name] = is_anchor_active()
         else:
             # Signal we are ready

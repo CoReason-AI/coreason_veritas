@@ -266,6 +266,7 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
             assert args_inner[0] == "inner_function"
             assert kwargs_inner["attributes"]["co.asset_id"] == str(payload_inner)
 
+
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
@@ -289,9 +290,9 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
             # Passing arguments positionally
             # wrapper looks for kwargs.get("spec") etc., which will be None
             with pytest.raises(ValueError, match="Missing signature argument"):
-                 # This simulates `protected_function(payload, signature, "u")`
-                 # but since we are calling the wrapper, we pass them as positional args to the wrapper
-                 await protected_function(payload, signature, "user-123")
+                # This simulates `protected_function(payload, signature, "u")`
+                # but since we are calling the wrapper, we pass them as positional args to the wrapper
+                await protected_function(payload, signature, "user-123")
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -323,7 +324,8 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
                 next_sig = sign_payload(next_payload, private_key)
 
                 # Recursive call
-                return 1 + await recursive_function(spec=next_payload, sig=next_sig, user=user)
+                res: int = await recursive_function(spec=next_payload, sig=next_sig, user=user)
+                return 1 + res
 
             result = await recursive_function(spec=payload, sig=signature, user="recurse-user")
             assert result == 3

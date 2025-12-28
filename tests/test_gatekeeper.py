@@ -148,10 +148,11 @@ def test_verify_asset_complex_nested_payload(key_pair: Tuple[RSAPrivateKey, str]
 
     assert validator.verify_asset(payload_reordered, signature) is True
 
+
 def test_verify_asset_empty_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification of an empty dictionary payload."""
     private_key, public_key_pem = key_pair
-    payload = {}
+    payload: Dict[str, Any] = {}
     signature = sign_payload(payload, private_key)
 
     validator = SignatureValidator(public_key_pem)

@@ -84,6 +84,7 @@ def test_start_governed_span_missing_attributes(mock_tracer: MagicMock) -> None:
     # Ensure no span was started
     mock_tracer.start_as_current_span.assert_not_called()
 
+
 def test_start_governed_span_non_string_attributes(mock_tracer: MagicMock) -> None:
     """
     Test that start_governed_span handles non-string attribute values.
@@ -100,7 +101,7 @@ def test_start_governed_span_non_string_attributes(mock_tracer: MagicMock) -> No
 
     # It takes Dict[str, str] in hint but implementation uses `attributes.copy()`.
     # It should work as long as mandatory keys exist.
-    with logger.start_governed_span("test-span", attributes): # type: ignore
+    with logger.start_governed_span("test-span", attributes):  # type: ignore
         pass
 
     mock_tracer.start_as_current_span.assert_called_once()
@@ -119,7 +120,7 @@ def test_start_governed_span_none_attributes(mock_tracer: MagicMock) -> None:
     mock_span = MagicMock()
     mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-    with logger.start_governed_span("test-span", attributes): # type: ignore
+    with logger.start_governed_span("test-span", attributes):  # type: ignore
         pass
 
     called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
