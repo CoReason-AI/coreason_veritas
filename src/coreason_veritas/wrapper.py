@@ -28,13 +28,14 @@ def get_public_key_from_store() -> str:
     return key
 
 
-def governed_execution(asset_id_arg: str, signature_arg: str) -> Callable[..., Any]:
+def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) -> Callable[..., Any]:
     """
     Decorator that bundles Gatekeeper, Auditor, and Anchor into a single atomic wrapper.
 
     Args:
         asset_id_arg: The name of the keyword argument containing the asset/spec.
         signature_arg: The name of the keyword argument containing the signature.
+        user_id_arg: The name of the keyword argument containing the user ID.
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -43,30 +44,25 @@ def governed_execution(asset_id_arg: str, signature_arg: str) -> Callable[..., A
             # 1. Gatekeeper Check
             sig = kwargs.get(signature_arg)
             asset = kwargs.get(asset_id_arg)
+            user_id = kwargs.get(user_id_arg)
 
             if sig is None:
                 raise ValueError(f"Missing signature argument: {signature_arg}")
             if asset is None:
                 raise ValueError(f"Missing asset argument: {asset_id_arg}")
+            if user_id is None:
+                raise ValueError(f"Missing user ID argument: {user_id_arg}")
 
             # Retrieve key from store (Env Var)
             public_key = get_public_key_from_store()
             SignatureValidator(public_key).verify_asset(asset, sig)
 
             # 2. Start Audit Span
-            # Note: func.__name__ is used as span name
-            # asset is passed as an attribute. The spec example passed {"asset": asset}
-            # which maps to `co.asset_id` in our Auditor logic (though we pass it as 'asset' here,
-            # IERLogger creates span with provided attributes.
-            # To be strictly compliant with Auditor "Mandatory Attributes", we should map it.
-            # However, the spec usage example was explicit: `{"asset": asset}`.
-            # I'll pass it as is, but maybe I should map it to `co.asset_id`?
-            # The Auditor spec says `co.asset_id` is mandatory.
-            # I will pass `co.asset_id` as well.
-
             attributes = {
-                "asset": str(asset),  # As per example
-                "co.asset_id": str(asset),  # For strict compliance
+                "asset": str(asset),  # Legacy support from spec example
+                "co.asset_id": str(asset),
+                "co.user_id": str(user_id),
+                "co.srb_sig": str(sig),
             }
 
             with IERLogger().start_governed_span(func.__name__, attributes):
