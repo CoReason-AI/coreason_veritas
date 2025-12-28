@@ -61,9 +61,7 @@ async def test_wrapper_sanitization_async(mock_env: RSAPrivateKey) -> None:
     spec = {"id": "1"}
     sig = sign_payload(spec, private_key)
 
-    @governed_execution(
-        asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config"
-    )  # type: ignore[misc]
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
     async def run_agent(spec: Dict[str, Any], sig: str, user: str, config: Dict[str, Any]) -> Dict[str, Any]:
         return config
 
@@ -83,9 +81,7 @@ def test_wrapper_sanitization_sync(mock_env: RSAPrivateKey) -> None:
     spec = {"id": "1"}
     sig = sign_payload(spec, private_key)
 
-    @governed_execution(
-        asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config"
-    )  # type: ignore[misc]
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
     def run_agent(spec: Dict[str, Any], sig: str, user: str, config: Dict[str, Any]) -> Dict[str, Any]:
         return config
 
@@ -102,9 +98,7 @@ async def test_wrapper_sanitization_async_gen(mock_env: RSAPrivateKey) -> None:
     spec = {"id": "1"}
     sig = sign_payload(spec, private_key)
 
-    @governed_execution(
-        asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config"
-    )  # type: ignore[misc]
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
     async def run_agent(
         spec: Dict[str, Any], sig: str, user: str, config: Dict[str, Any]
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -121,9 +115,7 @@ def test_wrapper_sanitization_sync_gen(mock_env: RSAPrivateKey) -> None:
     spec = {"id": "1"}
     sig = sign_payload(spec, private_key)
 
-    @governed_execution(
-        asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config"
-    )  # type: ignore[misc]
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
     def run_agent(
         spec: Dict[str, Any], sig: str, user: str, config: Dict[str, Any]
     ) -> Generator[Dict[str, Any], None, None]:
