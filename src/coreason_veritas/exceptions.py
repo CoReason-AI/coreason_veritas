@@ -8,15 +8,8 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-"""
-coreason_veritas is the non-negotiable governance layer of the CoReason platform
-"""
 
-__version__ = "0.1.0"
-__author__ = "Gowtham A Rao"
-__email__ = "gowtham.rao@coreason.ai"
+class AssetTamperedError(Exception):
+    """Raised when asset verification fails."""
 
-from .main import hello_world
-from .wrapper import governed_execution
-
-__all__ = ["hello_world", "governed_execution"]
+    pass
