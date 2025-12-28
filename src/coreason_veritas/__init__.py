@@ -23,7 +23,7 @@ __version__ = "0.1.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
-__all__ = ["governed_execution"]
+__all__ = ["governed_execution", "SignatureValidator", "DeterminismInterceptor"]
 
 try:
     _auditor = IERLogger()
