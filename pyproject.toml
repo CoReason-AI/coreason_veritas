@@ -3,9 +3,19 @@ name = "coreason_veritas"
 version = "0.1.0"
 description = "coreason_veritas is the non-negotiable governance layer of the CoReason platform"
 authors = ["Gowtham A Rao <gowtham.rao@coreason.ai>"]
-license = "Prosperity-3.0"
+license = "Proprietary"
 readme = "README.md"
 packages = [{include = "coreason_veritas", from = "src"}]
+classifiers = [
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+[tool.poetry.urls]
+Homepage = "https://github.com/CoReason-AI/coreason_veritas"
+Repository = "https://github.com/CoReason-AI/coreason_veritas"
+Documentation = "https://github.com/CoReason-AI/coreason_veritas"
 
 [tool.poetry.dependencies]
 python = ">=3.12, <3.15"
@@ -23,31 +33,11 @@ mkdocs = "^1.6.0"
 mkdocs-material = "^9.5.26"
 opentelemetry-sdk = "^1.39.1"
 pytest-asyncio = "^1.3.0"
+twine = "^6.2.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-[project]
-name = "coreason_veritas"
-version = "0.1.0"
-description = "coreason_veritas is the non-negotiable governance layer of the CoReason platform"
-readme = "README.md"
-requires-python = ">=3.11"
-authors = [
-    { name = "Gowtham A Rao", email = "gowtham.rao@coreason.ai" },
-]
-license = { file = "LICENSE" }
-classifiers = [
-    "License :: Other/Proprietary License",
-    "Programming Language :: Python :: 3.12",
-    "Operating System :: OS Independent",
-]
-
-[project.urls]
-Homepage = "https://github.com/CoReason-AI/coreason_veritas"
-Repository = "https://github.com/CoReason-AI/coreason_veritas"
-Documentation = "https://github.com/CoReason-AI/coreason_veritas"
 
 [tool.ruff]
 line-length = 120
