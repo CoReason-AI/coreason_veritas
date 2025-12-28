@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
-from typing import AsyncGenerator, Generator
+from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -20,7 +20,7 @@ import coreason_veritas.main
 from coreason_veritas.main import app, lifespan
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore[misc]
 def mock_httpx_client() -> Generator[AsyncMock, None, None]:
     """
     Mocks the httpx.AsyncClient that is instantiated during app startup (lifespan).
@@ -32,7 +32,7 @@ def mock_httpx_client() -> Generator[AsyncMock, None, None]:
         yield mock_instance
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore[misc]
 def client(mock_httpx_client: AsyncMock) -> Generator[TestClient, None, None]:
     """
     Fixture that returns a TestClient context manager to trigger lifespan events.
@@ -42,9 +42,7 @@ def client(mock_httpx_client: AsyncMock) -> Generator[TestClient, None, None]:
         yield c
 
 
-def test_governed_inference_determinism_enforcement(
-    client: TestClient, mock_httpx_client: AsyncMock
-) -> None:
+def test_governed_inference_determinism_enforcement(client: TestClient, mock_httpx_client: AsyncMock) -> None:
     """
     Test that the gateway proxy enforces determinism (temperature=0.0, seed=42)
     even when the user requests otherwise.
@@ -67,9 +65,7 @@ def test_governed_inference_determinism_enforcement(
         "seed": 12345,
     }
 
-    response = client.post(
-        "/v1/chat/completions", json=payload, headers={"Authorization": "Bearer test-key"}
-    )
+    response = client.post("/v1/chat/completions", json=payload, headers={"Authorization": "Bearer test-key"})
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "Hello world"
@@ -90,9 +86,7 @@ def test_governed_inference_determinism_enforcement(
     assert sent_headers["Authorization"] == "Bearer test-key"
 
 
-def test_governed_inference_configurable_upstream(
-    client: TestClient, mock_httpx_client: AsyncMock
-) -> None:
+def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx_client: AsyncMock) -> None:
     """
     Test that the upstream URL is configurable via environment variable.
     """
@@ -130,9 +124,7 @@ def test_run_server_configuration() -> None:
             assert kwargs["port"] == 9000
 
 
-def test_governed_inference_missing_auth_header(
-    client: TestClient, mock_httpx_client: AsyncMock
-) -> None:
+def test_governed_inference_missing_auth_header(client: TestClient, mock_httpx_client: AsyncMock) -> None:
     """
     Test that the gateway works even if no Authorization header is present (public endpoint scenario).
     """
@@ -148,9 +140,7 @@ def test_governed_inference_missing_auth_header(
     assert "Authorization" not in sent_headers
 
 
-def test_governed_inference_upstream_error(
-    client: TestClient, mock_httpx_client: AsyncMock
-) -> None:
+def test_governed_inference_upstream_error(client: TestClient, mock_httpx_client: AsyncMock) -> None:
     """
     Test that the gateway propagates upstream errors (e.g. 500) correctly.
     """
@@ -165,9 +155,7 @@ def test_governed_inference_upstream_error(
     assert response.json() == {"error": "Internal Server Error"}
 
 
-def test_governed_inference_upstream_timeout(
-    client: TestClient, mock_httpx_client: AsyncMock
-) -> None:
+def test_governed_inference_upstream_timeout(client: TestClient, mock_httpx_client: AsyncMock) -> None:
     """
     Test handling of upstream timeout.
     """
@@ -177,7 +165,7 @@ def test_governed_inference_upstream_timeout(
         client.post("/v1/chat/completions", json={"model": "test"})
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_lifespan_initialization() -> None:
     """
     Verify that the lifespan context manager initializes and closes the http client.
