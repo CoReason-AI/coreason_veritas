@@ -1,4 +1,3 @@
-
 import concurrent.futures
 import json
 import os
@@ -47,7 +46,7 @@ def test_threaded_sync_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             mock_get_tracer.return_value = mock_tracer
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")  # type: ignore[misc]
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def work(spec: Dict[str, Any], sig: str, user: str) -> int:
                 assert is_anchor_active()
                 return threading.get_ident()
@@ -79,12 +78,12 @@ async def test_mixed_nesting_sync_calls_async(key_pair: Tuple[RSAPrivateKey, str
             mock_get_tracer.return_value = mock_tracer
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")  # type: ignore[misc]
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def inner_async(spec: Dict[str, Any], sig: str, user: str) -> str:
                 assert is_anchor_active()
                 return "inner"
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")  # type: ignore[misc]
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def outer_sync(spec: Dict[str, Any], sig: str, user: str) -> Any:
                 assert is_anchor_active()
                 # Return the coroutine to be awaited by the test.
@@ -115,7 +114,7 @@ def test_evil_str_attribute(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")  # type: ignore[misc]
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def safe_func(spec: Dict[str, Any], sig: str, user: Any) -> str:
                 return "ok"
 
@@ -135,7 +134,7 @@ def test_governed_sync_generator(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             mock_get_tracer.return_value = mock_tracer
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")  # type: ignore[misc]
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def my_gen(spec: Dict[str, Any], sig: str, user: str) -> Any:
                 yield 1
                 # At this point, wrapper context MUST be active
@@ -163,7 +162,7 @@ async def test_governed_async_generator(key_pair: Tuple[RSAPrivateKey, str]) -> 
             mock_get_tracer.return_value = mock_tracer
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")  # type: ignore[misc]
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def my_agen(spec: Dict[str, Any], sig: str, user: str) -> Any:
                 yield 1
                 if not is_anchor_active():

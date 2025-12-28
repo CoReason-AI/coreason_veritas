@@ -40,7 +40,6 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-
         def _perform_gatekeeping(kwargs: Dict[str, Any]) -> Dict[str, str]:
             # 1. Gatekeeper Check
             sig = kwargs.get(signature_arg)
@@ -67,6 +66,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
             }
 
         if inspect.isasyncgenfunction(func):
+
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
@@ -74,18 +74,22 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                     with DeterminismInterceptor().scope():
                         async for item in func(*args, **kwargs):
                             yield item
+
             return wrapper
 
         elif inspect.isgeneratorfunction(func):
+
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     with DeterminismInterceptor().scope():
                         yield from func(*args, **kwargs)
+
             return wrapper
 
         elif inspect.iscoroutinefunction(func):
+
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
@@ -95,9 +99,11 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor().scope():
                         return await func(*args, **kwargs)
+
             return wrapper
 
         else:
+
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
@@ -107,6 +113,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor().scope():
                         return func(*args, **kwargs)
+
             return wrapper
 
     return decorator
