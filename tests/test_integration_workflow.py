@@ -11,20 +11,19 @@
 import asyncio
 import json
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
-from opentelemetry import trace
 
-from coreason_veritas.anchor import is_anchor_active, DeterminismInterceptor
+from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 from coreason_veritas.wrapper import governed_execution
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore[misc]
 def key_pair() -> Tuple[RSAPrivateKey, str]:
     """Generates a private/public key pair for testing."""
     private_key = rsa.generate_private_key(
@@ -51,7 +50,7 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     return str(signature.hex())
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_blast_radius(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test 'Blast Radius' (Nested Partial Failure).
@@ -121,7 +120,7 @@ async def test_blast_radius(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             assert "inner_task_b" in func_names
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_detached_task_propagation(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test 'Detached Task' Propagation.
@@ -142,14 +141,14 @@ async def test_detached_task_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
             # Background Task
-            async def background_worker(queue: asyncio.Queue) -> None:
+            async def background_worker(queue: "asyncio.Queue[bool]") -> None:
                 is_active = is_anchor_active()
                 await queue.put(is_active)
 
             # Governed Function
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def governed_spawner(spec: Dict[str, Any], sig: str, user: str) -> bool:
-                queue: asyncio.Queue = asyncio.Queue()
+                queue: asyncio.Queue[bool] = asyncio.Queue()
                 # Spawn task
                 task = asyncio.create_task(background_worker(queue))
                 # Wait for result
@@ -164,7 +163,7 @@ async def test_detached_task_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
             assert result is True, "Anchor state should propagate to detached tasks"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_determinism_enforcement_integration(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test 'The Determinism Enforcement'.
@@ -185,12 +184,7 @@ async def test_determinism_enforcement_integration(key_pair: Tuple[RSAPrivateKey
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def llm_client_user(spec: Dict[str, Any], sig: str, user: str) -> Dict[str, Any]:
-                unsafe_config = {
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                    "seed": 12345,
-                    "model": "gpt-4"
-                }
+                unsafe_config = {"temperature": 0.7, "top_p": 0.9, "seed": 12345, "model": "gpt-4"}
                 # User calls this helper
                 interceptor = DeterminismInterceptor()
                 return interceptor.enforce_config(unsafe_config)
@@ -205,7 +199,7 @@ async def test_determinism_enforcement_integration(key_pair: Tuple[RSAPrivateKey
             assert final_config["model"] == "gpt-4"  # Preserved
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test 'The Sandwich' (Governed -> Ungoverned -> Governed).
@@ -236,7 +230,7 @@ async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             async def middle_layer(user: str) -> str:
                 # Expect Anchor to still be active because it's in the same context
                 assert is_anchor_active() is True
-                return await inner_layer(spec=payload_inner, sig=sig_inner, user=user)
+                return cast(str, await inner_layer(spec=payload_inner, sig=sig_inner, user=user))
 
             # Outer Governed
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
@@ -251,7 +245,7 @@ async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             assert mock_tracer.start_as_current_span.call_count == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_trace_context_propagation(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test 'Trace Context Propagation'.
