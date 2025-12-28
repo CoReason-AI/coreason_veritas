@@ -9,7 +9,8 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
-from typing import Any, Dict
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict
 
 import httpx
 import uvicorn
@@ -18,7 +19,19 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from coreason_veritas.anchor import DeterminismInterceptor
 
-app = FastAPI(title="CoReason Veritas Gateway")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    Manage the lifecycle of the FastAPI application.
+    Initializes a shared HTTP client on startup and closes it on shutdown.
+    """
+    app.state.http_client = httpx.AsyncClient()
+    yield
+    await app.state.http_client.aclose()
+
+
+app = FastAPI(title="CoReason Veritas Gateway", lifespan=lifespan)
 
 # Configuration from Environment Variables
 LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "https://api.openai.com/v1/chat/completions")
@@ -34,10 +47,6 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
     headers = dict(request.headers)
 
     # 2. Anchor Check: Enforce Determinism
-    # The spec example uses static method, but the implementation in anchor.py is an instance method?
-    # Let's check anchor.py again.
-    # anchor.py: def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]:
-    # It is now a static method as per the spec.
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
     # 3. Proxy: Forward to LLM Provider
@@ -46,15 +55,15 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
     if "authorization" in headers:
         proxy_headers["Authorization"] = headers["authorization"]
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            LLM_PROVIDER_URL,
-            json=governed_body,
-            headers=proxy_headers,
-            timeout=60.0,
-        )
-        # We return the JSON response from the provider
-        return resp.json()  # type: ignore[no-any-return]
+    client: httpx.AsyncClient = request.app.state.http_client
+    resp = await client.post(
+        LLM_PROVIDER_URL,
+        json=governed_body,
+        headers=proxy_headers,
+        timeout=60.0,
+    )
+    # We return the JSON response from the provider
+    return resp.json()  # type: ignore[no-any-return]
 
 
 # Instrument the app
