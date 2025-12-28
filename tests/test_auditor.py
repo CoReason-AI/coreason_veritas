@@ -209,7 +209,8 @@ def test_start_governed_span_extra_attributes(mock_exporters: None, mock_tracer:
     mock_span = MagicMock()
     mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-    with logger.start_governed_span("test-span", attributes):
+    # MyPy complains about mixed types in dict passed to start_governed_span
+    with logger.start_governed_span("test-span", attributes):  # type: ignore[arg-type]
         pass
 
     called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
