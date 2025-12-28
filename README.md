@@ -101,6 +101,20 @@ print(safe_config)
 
 ### Installation
 
+You can install `coreason_veritas` directly from PyPI:
+
+```sh
+pip install coreason-veritas
+```
+
+Or using Poetry:
+
+```sh
+poetry add coreason-veritas
+```
+
+Alternatively, to install from source:
+
 1.  Clone the repository:
     ```sh
     git clone https://github.com/CoReason-AI/coreason_veritas.git
@@ -121,3 +135,7 @@ print(safe_config)
     ```sh
     poetry run pytest
     ```
+
+## License
+
+This project is licensed under the Prosperity Public License 3.0.0. See the [LICENSE](LICENSE) file for details.
