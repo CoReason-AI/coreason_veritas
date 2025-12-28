@@ -108,3 +108,42 @@ def test_verify_asset_malformed_key() -> None:
     validator = SignatureValidator("not-a-pem-key")
     with pytest.raises(AssetTamperedError):
         validator.verify_asset({"a": 1}, "deadbeef")
+
+
+def test_verify_asset_complex_nested_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test verification of a deeply nested and complex JSON payload.
+    Ensures that canonicalization works consistently for complex structures.
+    """
+    private_key, public_key_pem = key_pair
+
+    # Complex payload with lists, nested dicts, different types
+    payload = {
+        "agent": "complex_veritas",
+        "config": {
+            "parameters": {"temperature": 0.0, "stop_sequences": ["\n", "User:"], "max_tokens": 1024},
+            "tools": [
+                {"name": "calculator", "enabled": True},
+                {"name": "search", "enabled": False, "details": {"provider": "google"}},
+            ],
+        },
+        "metadata": {"version": 2, "tags": ["gxp", "audit"], "extra": None},
+    }
+
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    assert validator.verify_asset(payload, signature) is True
+
+    # Verify that changing order of keys in dict (logic-wise same, but python dicts are ordered)
+    # or ensuring stability is handled by json.dumps(sort_keys=True)
+
+    # Create a new dict with same data but inserted in different order (if possible to simulate)
+    # Python 3.7+ preserves insertion order, so we can try constructing it differently.
+
+    payload_reordered = {}
+    payload_reordered["metadata"] = payload["metadata"]
+    payload_reordered["agent"] = payload["agent"]
+    payload_reordered["config"] = payload["config"]
+
+    assert validator.verify_asset(payload_reordered, signature) is True

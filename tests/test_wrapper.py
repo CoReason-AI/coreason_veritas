@@ -8,6 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import asyncio
 import json
 import os
 from typing import Any, Dict, Tuple
@@ -136,3 +137,72 @@ async def test_governed_execution_missing_args(key_pair: Tuple[RSAPrivateKey, st
 
     with pytest.raises(ValueError, match="Missing asset argument"):
         await protected_function(sig="abc")  # Missing spec
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test that concurrent executions maintain isolated Anchor states.
+    We run a governed function concurrent with a non-governed function
+    and ensure the non-governed one sees Anchor as inactive.
+    """
+    private_key, public_key_pem = key_pair
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        payload = {"data": "concurrent"}
+        signature = sign_payload(payload, private_key)
+
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_span = MagicMock()
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig")
+            async def governed_task(spec: Dict[str, Any], sig: str) -> bool:
+                await asyncio.sleep(0.05)  # Yield control
+                return is_anchor_active()
+
+            async def ungoverned_task() -> bool:
+                await asyncio.sleep(0.05)  # Yield control
+                return is_anchor_active()
+
+            # Run both concurrently
+            task1 = asyncio.create_task(governed_task(spec=payload, sig=signature))
+            task2 = asyncio.create_task(ungoverned_task())
+
+            is_active_governed, is_active_ungoverned = await asyncio.gather(task1, task2)
+
+            # Verification
+            assert is_active_governed is True, "Governed task should have Anchor active"
+            assert is_active_ungoverned is False, "Ungoverned task should NOT have Anchor active"
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test that spans are closed/recorded even if the wrapped function raises an exception."""
+    private_key, public_key_pem = key_pair
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        payload = {"data": "error"}
+        signature = sign_payload(payload, private_key)
+
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_span = MagicMock()
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+            # Configure mock span to support context manager behavior fully if needed
+            # start_as_current_span handles exception automatically by OTel design,
+            # we just want to ensure it was called.
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig")
+            async def failing_function(spec: Dict[str, Any], sig: str) -> None:
+                raise RuntimeError("Planned failure")
+
+            with pytest.raises(RuntimeError, match="Planned failure"):
+                await failing_function(spec=payload, sig=signature)
+
+            # Verify Auditor was still called (span started)
+            mock_tracer.start_as_current_span.assert_called_once()
