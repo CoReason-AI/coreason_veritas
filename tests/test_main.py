@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
-from typing import Generator
+from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -17,20 +17,34 @@ import pytest
 from fastapi.testclient import TestClient
 
 import coreason_veritas.main
-from coreason_veritas.main import app
-
-client = TestClient(app)
+from coreason_veritas.main import app, lifespan
 
 
-@pytest.fixture  # type: ignore[misc]
+@pytest.fixture
 def mock_httpx_client() -> Generator[AsyncMock, None, None]:
-    with patch("httpx.AsyncClient") as mock_client:
+    """
+    Mocks the httpx.AsyncClient that is instantiated during app startup (lifespan).
+    This fixture must be active BEFORE the client fixture starts the app.
+    """
+    with patch("httpx.AsyncClient") as mock_cls:
         mock_instance = AsyncMock()
-        mock_client.return_value.__aenter__.return_value = mock_instance
+        mock_cls.return_value = mock_instance
         yield mock_instance
 
 
-def test_governed_inference_determinism_enforcement(mock_httpx_client: AsyncMock) -> None:
+@pytest.fixture
+def client(mock_httpx_client: AsyncMock) -> Generator[TestClient, None, None]:
+    """
+    Fixture that returns a TestClient context manager to trigger lifespan events.
+    Depends on mock_httpx_client to ensure the patch is active during startup.
+    """
+    with TestClient(app) as c:
+        yield c
+
+
+def test_governed_inference_determinism_enforcement(
+    client: TestClient, mock_httpx_client: AsyncMock
+) -> None:
     """
     Test that the gateway proxy enforces determinism (temperature=0.0, seed=42)
     even when the user requests otherwise.
@@ -53,7 +67,9 @@ def test_governed_inference_determinism_enforcement(mock_httpx_client: AsyncMock
         "seed": 12345,
     }
 
-    response = client.post("/v1/chat/completions", json=payload, headers={"Authorization": "Bearer test-key"})
+    response = client.post(
+        "/v1/chat/completions", json=payload, headers={"Authorization": "Bearer test-key"}
+    )
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "Hello world"
@@ -74,7 +90,9 @@ def test_governed_inference_determinism_enforcement(mock_httpx_client: AsyncMock
     assert sent_headers["Authorization"] == "Bearer test-key"
 
 
-def test_governed_inference_configurable_upstream(mock_httpx_client: AsyncMock) -> None:
+def test_governed_inference_configurable_upstream(
+    client: TestClient, mock_httpx_client: AsyncMock
+) -> None:
     """
     Test that the upstream URL is configurable via environment variable.
     """
@@ -112,7 +130,9 @@ def test_run_server_configuration() -> None:
             assert kwargs["port"] == 9000
 
 
-def test_governed_inference_missing_auth_header(mock_httpx_client: AsyncMock) -> None:
+def test_governed_inference_missing_auth_header(
+    client: TestClient, mock_httpx_client: AsyncMock
+) -> None:
     """
     Test that the gateway works even if no Authorization header is present (public endpoint scenario).
     """
@@ -128,7 +148,9 @@ def test_governed_inference_missing_auth_header(mock_httpx_client: AsyncMock) ->
     assert "Authorization" not in sent_headers
 
 
-def test_governed_inference_upstream_error(mock_httpx_client: AsyncMock) -> None:
+def test_governed_inference_upstream_error(
+    client: TestClient, mock_httpx_client: AsyncMock
+) -> None:
     """
     Test that the gateway propagates upstream errors (e.g. 500) correctly.
     """
@@ -137,29 +159,37 @@ def test_governed_inference_upstream_error(mock_httpx_client: AsyncMock) -> None
     mock_response.status_code = 500
     mock_httpx_client.post.return_value = mock_response
 
-    # In our implementation we return the JSON of the response
-    # FastApi will default to 200 OK with the returned dict unless we explicitly set response.status_code
-    # Wait, the current implementation in main.py is:
-    # return resp.json()
-    # It does NOT propagate the status code from resp to the client response status code.
-    # It just returns the body.
-    # So the client will receive 200 OK with the error body.
-    # This might be desired or not, but strictly speaking based on the code:
-
     response = client.post("/v1/chat/completions", json={"model": "test"})
 
     # Check that we get the error body back
     assert response.json() == {"error": "Internal Server Error"}
-    # Note: Status code remains 200 because we defined return type as Dict
-    # and didn't access Response object to set status.
 
 
-def test_governed_inference_upstream_timeout(mock_httpx_client: AsyncMock) -> None:
+def test_governed_inference_upstream_timeout(
+    client: TestClient, mock_httpx_client: AsyncMock
+) -> None:
     """
     Test handling of upstream timeout.
     """
     mock_httpx_client.post.side_effect = httpx.ReadTimeout("Timeout")
 
     with pytest.raises(httpx.ReadTimeout):
-        # The exception will bubble up because we don't catch it in main.py
         client.post("/v1/chat/completions", json={"model": "test"})
+
+
+@pytest.mark.asyncio
+async def test_lifespan_initialization() -> None:
+    """
+    Verify that the lifespan context manager initializes and closes the http client.
+    """
+    with patch("httpx.AsyncClient") as mock_cls:
+        mock_instance = AsyncMock()
+        mock_cls.return_value = mock_instance
+
+        async with lifespan(app):
+            # Startup: Client created
+            mock_cls.assert_called_once()
+            assert app.state.http_client == mock_instance
+
+        # Shutdown: Client closed
+        mock_instance.aclose.assert_called_once()
