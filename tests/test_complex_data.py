@@ -14,11 +14,12 @@ from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
-from coreason_veritas.gatekeeper import SignatureValidator
-from coreason_veritas.wrapper import governed_execution
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+
+from coreason_veritas.gatekeeper import SignatureValidator
+from coreason_veritas.wrapper import governed_execution
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -90,7 +91,7 @@ def test_verify_unicode_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
         "jp": "こんにちは世界",
         "emoji": "👋 🌍 🚀",
         "symbols": "≤≥≠≈∞",
-        "mixed": "A string with unique chars: \u00E9 \u00F1 \u00AE",
+        "mixed": "A string with unique chars: \u00e9 \u00f1 \u00ae",
     }
 
     signature = sign_payload(payload, private_key)
