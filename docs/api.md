@@ -12,7 +12,8 @@ The primary entry point for the library. This decorator bundles the Gatekeeper, 
 def governed_execution(
     asset_id_arg: str,
     signature_arg: str,
-    user_id_arg: str
+    user_id_arg: str,
+    config_arg: Optional[str] = None
 ) -> Callable[..., Any]
 ```
 
@@ -21,10 +22,11 @@ def governed_execution(
 *   `asset_id_arg` (*str*): The name of the keyword argument in the decorated function that contains the asset or specification.
 *   `signature_arg` (*str*): The name of the keyword argument in the decorated function that contains the cryptographic signature.
 *   `user_id_arg` (*str*): The name of the keyword argument in the decorated function that contains the user ID.
+*   `config_arg` (*Optional[str]*): The name of the keyword argument in the decorated function that contains the configuration dictionary. If provided, the configuration will be sanitized by the Anchor.
 
 **Returns:**
 
-*   (*Callable[..., Any]*): A decorated function that performs verification, tracing, and determinism enforcement before executing the original function.
+*   (*Callable[..., Any]*): A decorated function that performs verification, tracing, and determinism enforcement before executing the original function. Supports asynchronous functions, synchronous functions, generators, and asynchronous generators.
 
 **Raises:**
 
@@ -140,7 +142,7 @@ def is_anchor_active() -> bool
 
 ### `IERLogger`
 
-Manages the connection to the OpenTelemetry collector and enforces strict metadata schema for the Immutable Execution Record (IER).
+Manages the connection to the OpenTelemetry collector and enforces strict metadata schema for the Immutable Execution Record (IER). This class implements the Singleton pattern.
 
 #### `__init__`
 
