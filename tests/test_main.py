@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
+from typing import Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,15 +20,15 @@ from coreason_veritas.main import app
 client = TestClient(app)
 
 
-@pytest.fixture
-def mock_httpx_client():
+@pytest.fixture  # type: ignore[misc]
+def mock_httpx_client() -> Generator[AsyncMock, None, None]:
     with patch("httpx.AsyncClient") as mock_client:
         mock_instance = AsyncMock()
         mock_client.return_value.__aenter__.return_value = mock_instance
         yield mock_instance
 
 
-def test_governed_inference_determinism_enforcement(mock_httpx_client):
+def test_governed_inference_determinism_enforcement(mock_httpx_client: AsyncMock) -> None:
     """
     Test that the gateway proxy enforces determinism (temperature=0.0, seed=42)
     even when the user requests otherwise.
@@ -50,9 +51,7 @@ def test_governed_inference_determinism_enforcement(mock_httpx_client):
         "seed": 12345,
     }
 
-    response = client.post(
-        "/v1/chat/completions", json=payload, headers={"Authorization": "Bearer test-key"}
-    )
+    response = client.post("/v1/chat/completions", json=payload, headers={"Authorization": "Bearer test-key"})
 
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "Hello world"
@@ -73,7 +72,7 @@ def test_governed_inference_determinism_enforcement(mock_httpx_client):
     assert sent_headers["Authorization"] == "Bearer test-key"
 
 
-def test_governed_inference_configurable_upstream(mock_httpx_client):
+def test_governed_inference_configurable_upstream(mock_httpx_client: AsyncMock) -> None:
     """
     Test that the upstream URL is configurable via environment variable.
     """
@@ -94,7 +93,7 @@ def test_governed_inference_configurable_upstream(mock_httpx_client):
         assert args[0] == custom_url
 
 
-def test_run_server_configuration():
+def test_run_server_configuration() -> None:
     """Test that run_server uses environment variables."""
     with patch("uvicorn.run") as mock_run:
         with patch.dict(os.environ, {"VERITAS_HOST": "127.0.0.1", "VERITAS_PORT": "9000"}):

@@ -24,7 +24,7 @@ app = FastAPI(title="CoReason Veritas Gateway")
 LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "https://api.openai.com/v1/chat/completions")
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions")  # type: ignore[misc]
 async def governed_inference(request: Request) -> Dict[str, Any]:
     """
     Gateway Proxy endpoint that enforces determinism and forwards requests to the LLM provider.
