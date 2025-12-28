@@ -14,16 +14,17 @@ from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
-from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
-from coreason_veritas.auditor import IERLogger
-from coreason_veritas.wrapper import governed_execution
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from loguru import logger
 
+from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
+from coreason_veritas.auditor import IERLogger
+from coreason_veritas.wrapper import governed_execution
 
-@pytest.fixture
+
+@pytest.fixture  # type: ignore[misc]
 def key_pair() -> Tuple[RSAPrivateKey, str]:
     """Generates a private/public key pair for testing."""
     private_key = rsa.generate_private_key(
@@ -50,7 +51,7 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     return str(signature.hex())
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_nested_governed_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test nested governed execution to verify side effects:
@@ -102,18 +103,18 @@ async def test_nested_governed_execution(key_pair: Tuple[RSAPrivateKey, str]) ->
 
             # Check Outer Attributes
             # Outer: Called BEFORE anchor scope, so determinism_verified should be "False"
-            outer_attrs = outer_call.kwargs['attributes']
-            assert outer_attrs['co.asset_id'] == str(payload)
-            assert outer_attrs['co.determinism_verified'] == 'False'
+            outer_attrs = outer_call.kwargs["attributes"]
+            assert outer_attrs["co.asset_id"] == str(payload)
+            assert outer_attrs["co.determinism_verified"] == "False"
 
             # Check Inner Attributes
             # Inner: Called INSIDE outer's anchor scope, so determinism_verified should be "True"
-            inner_attrs = inner_call.kwargs['attributes']
-            assert inner_attrs['co.asset_id'] == str(payload)
-            assert inner_attrs['co.determinism_verified'] == 'True'
+            inner_attrs = inner_call.kwargs["attributes"]
+            assert inner_attrs["co.asset_id"] == str(payload)
+            assert inner_attrs["co.determinism_verified"] == "True"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_exception_state_recovery(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test that the anchor state is correctly reset when a governed function raises an exception.
@@ -123,7 +124,7 @@ async def test_exception_state_recovery(key_pair: Tuple[RSAPrivateKey, str]) -> 
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        with patch("coreason_veritas.auditor.trace.get_tracer"): # Mock to suppress actual OTel
+        with patch("coreason_veritas.auditor.trace.get_tracer"):  # Mock to suppress actual OTel
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def failing_task(spec: Dict[str, Any], sig: str, user: str) -> None:
@@ -161,7 +162,7 @@ def test_audit_attribute_enforcement() -> None:
             pass
 
     # Success case
-    with patch("coreason_veritas.auditor.trace.get_tracer"): # Suppress OTel
+    with patch("coreason_veritas.auditor.trace.get_tracer"):  # Suppress OTel
         attributes = {
             "co.user_id": "u1",
             "co.asset_id": "a1",
