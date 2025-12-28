@@ -48,14 +48,14 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 class SignatureValidator:
-    def __init__(self, public_key_pem: str = None):
-        self.public_key_pem = public_key_pem
+    def __init__(self, public_key_store: str = None):
+        self.public_key_store = public_key_store
 
-    def verify_asset(self, payload: dict, signature_hex: str) -> bool:
+    def verify_asset(self, asset_payload: dict, signature: str) -> bool:
         """
         1. Loads PEM public key.
-        2. Canonicalizes payload (sort_keys=True).
-        3. Verifies signature_hex against payload hash using padding.PSS.
+        2. Canonicalizes asset_payload (sort_keys=True).
+        3. Verifies signature against payload hash using padding.PSS.
         """
         pass
 
@@ -142,11 +142,16 @@ The primary interface for developers is the `@governed_execution` decorator, whi
 ```python
 from coreason_veritas import governed_execution
 
-@governed_execution(asset_id_arg="spec_id", signature_arg="signature")
-async def execute_agent_logic(spec_id: str, signature: str, input_data: dict):
+@governed_execution(
+    asset_id_arg="spec_id",
+    signature_arg="signature",
+    user_id_arg="user_id",
+    config_arg="config"  # Optional
+)
+async def execute_agent_logic(spec_id: str, signature: str, user_id: str, config: dict):
     # 1. Gatekeeper runs first. If signature fails, this code is UNREACHABLE.
     # 2. Auditor starts the Span.
-    # 3. Anchor ensures determinism.
+    # 3. Anchor ensures determinism (sanitizing 'config').
     ...
 
 ```
@@ -221,14 +226,20 @@ The IP and Port are now pulled from environment variables. If they aren't set, i
 
 
 import os
+from contextlib import asynccontextmanager
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from .gatekeeper import SignatureValidator
 from .anchor import DeterminismInterceptor
 
-app = FastAPI(title="CoReason Veritas Gateway")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.http_client = httpx.AsyncClient()
+    yield
+    await app.state.http_client.aclose()
+
+app = FastAPI(title="CoReason Veritas Gateway", lifespan=lifespan)
 
 @app.post("/v1/chat/completions")
 async def governed_inference(request: Request):
@@ -239,13 +250,13 @@ async def governed_inference(request: Request):
     # Anchor Check
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            json=governed_body,
-            headers={"Authorization": headers.get("authorization")}
-        )
-        return resp.json()
+    client = request.app.state.http_client
+    resp = await client.post(
+        "https://api.openai.com/v1/chat/completions",
+        json=governed_body,
+        headers={"Authorization": headers.get("authorization")}
+    )
+    return resp.json()
 
 FastAPIInstrumentor.instrument_app(app)
 
