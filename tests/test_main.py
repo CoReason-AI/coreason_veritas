@@ -16,6 +16,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+import coreason_veritas.main
 from coreason_veritas.main import app
 
 client = TestClient(app)
@@ -80,8 +81,11 @@ def test_governed_inference_configurable_upstream(mock_httpx_client: AsyncMock) 
     # Mock environment variable
     custom_url = "https://custom-llm-provider.com/v1/chat"
 
-    # We must patch the constant imported in main.py because it's already bound at import time.
-    with patch("coreason_veritas.main.LLM_PROVIDER_URL", custom_url):
+    # We patch the attribute on the imported module object directly
+    with patch.object(coreason_veritas.main, "LLM_PROVIDER_URL", custom_url):
+        # Verify patch applied
+        assert coreason_veritas.main.LLM_PROVIDER_URL == custom_url
+
         mock_response = MagicMock()
         mock_response.json.return_value = {}
         mock_response.status_code = 200
