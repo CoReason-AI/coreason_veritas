@@ -14,12 +14,11 @@ from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
+from coreason_veritas.gatekeeper import SignatureValidator
+from coreason_veritas.wrapper import governed_execution
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
-
-from coreason_veritas.gatekeeper import SignatureValidator
-from coreason_veritas.wrapper import governed_execution
 
 
 @pytest.fixture  # type: ignore[misc]

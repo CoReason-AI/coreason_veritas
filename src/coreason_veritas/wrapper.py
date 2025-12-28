@@ -8,8 +8,8 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import os
 import inspect
+import os
 from functools import wraps
 from typing import Any, Callable, Dict
 
@@ -40,7 +40,6 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-
         def _perform_gatekeeping(kwargs: Dict[str, Any]) -> Dict[str, str]:
             # 1. Gatekeeper Check
             sig = kwargs.get(signature_arg)
@@ -67,6 +66,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
             }
 
         if inspect.iscoroutinefunction(func):
+
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
@@ -76,8 +76,10 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor().scope():
                         return await func(*args, **kwargs)
+
             return wrapper
         else:
+
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
@@ -87,6 +89,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor().scope():
                         return func(*args, **kwargs)
+
             return wrapper
 
     return decorator

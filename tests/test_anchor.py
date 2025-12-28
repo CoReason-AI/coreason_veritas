@@ -12,7 +12,6 @@ import time
 from typing import Any, Dict
 
 import pytest
-
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 
 

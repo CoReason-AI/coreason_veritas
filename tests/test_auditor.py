@@ -12,7 +12,6 @@ from typing import Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 
