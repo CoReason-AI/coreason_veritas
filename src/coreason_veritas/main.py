@@ -37,10 +37,8 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
     # The spec example uses static method, but the implementation in anchor.py is an instance method?
     # Let's check anchor.py again.
     # anchor.py: def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]:
-    # It is NOT a static method in the provided code (I read it earlier).
-    # So I must instantiate it.
-    interceptor = DeterminismInterceptor()
-    governed_body = interceptor.enforce_config(raw_body)
+    # It is now a static method as per the spec.
+    governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
     # 3. Proxy: Forward to LLM Provider
     # We only forward essential headers like Authorization

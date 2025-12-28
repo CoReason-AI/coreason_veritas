@@ -18,9 +18,8 @@ from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 
 def test_enforce_config_defaults() -> None:
     """Test that enforce_config applies defaults to an empty config."""
-    interceptor = DeterminismInterceptor()
     config: Dict[str, Any] = {}
-    sanitized = interceptor.enforce_config(config)
+    sanitized = DeterminismInterceptor.enforce_config(config)
 
     assert sanitized["temperature"] == 0.0
     assert sanitized["top_p"] == 1.0
@@ -31,9 +30,8 @@ def test_enforce_config_defaults() -> None:
 
 def test_enforce_config_override() -> None:
     """Test that enforce_config overrides unsafe values."""
-    interceptor = DeterminismInterceptor()
     config = {"temperature": 0.7, "top_p": 0.9, "seed": 123, "other_param": "value"}
-    sanitized = interceptor.enforce_config(config)
+    sanitized = DeterminismInterceptor.enforce_config(config)
 
     assert sanitized["temperature"] == 0.0
     assert sanitized["top_p"] == 1.0
@@ -43,9 +41,8 @@ def test_enforce_config_override() -> None:
 
 def test_enforce_config_compliant() -> None:
     """Test that enforce_config handles already compliant values without change."""
-    interceptor = DeterminismInterceptor()
     config = {"temperature": 0.0, "top_p": 1.0, "seed": 42}
-    sanitized = interceptor.enforce_config(config)
+    sanitized = DeterminismInterceptor.enforce_config(config)
 
     assert sanitized["temperature"] == 0.0
     assert sanitized["top_p"] == 1.0
@@ -54,11 +51,9 @@ def test_enforce_config_compliant() -> None:
 
 def test_scope_activation() -> None:
     """Test that the scope context manager sets the active flag."""
-    interceptor = DeterminismInterceptor()
-
     assert is_anchor_active() is False
 
-    with interceptor.scope():
+    with DeterminismInterceptor.scope():
         assert is_anchor_active() is True
 
     assert is_anchor_active() is False
@@ -66,13 +61,11 @@ def test_scope_activation() -> None:
 
 def test_scope_nested() -> None:
     """Test nested scopes work correctly."""
-    interceptor = DeterminismInterceptor()
-
     assert is_anchor_active() is False
 
-    with interceptor.scope():
+    with DeterminismInterceptor.scope():
         assert is_anchor_active() is True
-        with interceptor.scope():
+        with DeterminismInterceptor.scope():
             assert is_anchor_active() is True
         assert is_anchor_active() is True
 
@@ -81,12 +74,10 @@ def test_scope_nested() -> None:
 
 def test_scope_exception() -> None:
     """Test that the flag is reset even if an exception occurs."""
-    interceptor = DeterminismInterceptor()
-
     assert is_anchor_active() is False
 
     try:
-        with interceptor.scope():
+        with DeterminismInterceptor.scope():
             assert is_anchor_active() is True
             raise ValueError("Test error")
     except ValueError:
@@ -97,11 +88,10 @@ def test_scope_exception() -> None:
 
 def test_enforce_config_invalid_types() -> None:
     """Test enforce_config behavior when config contains invalid types."""
-    interceptor = DeterminismInterceptor()
     # User might pass "0.7" as string, but we want 0.0 float
     config = {"temperature": "0.7", "top_p": "0.9", "seed": "123"}
     # The interceptor doesn't validate input types, but it forcefully sets valid types.
-    sanitized = interceptor.enforce_config(config)
+    sanitized = DeterminismInterceptor.enforce_config(config)
 
     assert sanitized["temperature"] == 0.0
     assert isinstance(sanitized["temperature"], float)
@@ -117,16 +107,14 @@ def test_enforce_config_none_input() -> None:
     Assuming types are enforced elsewhere, but if user passes None as config, copy() will fail.
     The type hint says Dict[str, Any], so None is theoretically invalid, but we should check robustness.
     """
-    interceptor = DeterminismInterceptor()
-
     # Empty dict is handled
-    assert interceptor.enforce_config({}) == {"temperature": 0.0, "top_p": 1.0, "seed": 42}
+    assert DeterminismInterceptor.enforce_config({}) == {"temperature": 0.0, "top_p": 1.0, "seed": 42}
 
     # If None is passed, it would raise AttributeError.
     # We can either let it raise or handle it. Based on existing code `raw_config.copy()`, it will raise.
     # Let's verify that it raises AttributeError.
     with pytest.raises(AttributeError):
-        interceptor.enforce_config(None)  # type: ignore
+        DeterminismInterceptor.enforce_config(None)  # type: ignore
 
 
 def test_scope_threading() -> None:
@@ -134,8 +122,6 @@ def test_scope_threading() -> None:
     Test that contextvars work correctly across threads.
     Each thread should have its own context.
     """
-    interceptor = DeterminismInterceptor()
-
     # Event to sync threads
     event = threading.Event()
 
@@ -143,7 +129,7 @@ def test_scope_threading() -> None:
 
     def thread_task(name: str, enable_scope: bool) -> None:
         if enable_scope:
-            with interceptor.scope():
+            with DeterminismInterceptor.scope():
                 # Signal we are inside scope
                 event.wait()  # Wait for other thread
                 results[name] = is_anchor_active()

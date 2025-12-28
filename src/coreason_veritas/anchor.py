@@ -29,7 +29,8 @@ class DeterminismInterceptor:
     Enforces the 'Lobotomy' Protocol for epistemic integrity.
     """
 
-    def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]:
+    @staticmethod
+    def enforce_config(raw_config: Dict[str, Any]) -> Dict[str, Any]:
         """
         The 'Lobotomy' Protocol:
         1. Forcibly sets `temperature = 0.0`.
@@ -62,8 +63,9 @@ class DeterminismInterceptor:
 
         return sanitized
 
+    @staticmethod
     @contextlib.contextmanager
-    def scope(self) -> Generator[None, None, None]:
+    def scope() -> Generator[None, None, None]:
         """
         Context manager that sets the Anchor context variable.
         Use this to wrap execution blocks that must be deterministic.
