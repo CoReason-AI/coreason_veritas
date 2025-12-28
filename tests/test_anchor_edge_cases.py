@@ -9,9 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 from collections import UserDict
-from typing import Any, Dict
-
-import pytest
+from typing import List, cast
 
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 
@@ -23,11 +21,7 @@ def test_enforce_config_shallow_copy_behavior() -> None:
     but nested mutable objects are shared.
     """
     nested_list = [1, 2, 3]
-    original_config = {
-        "temperature": 0.9,
-        "nested": nested_list,
-        "metadata": {"key": "value"}
-    }
+    original_config = {"temperature": 0.9, "nested": nested_list, "metadata": {"key": "value"}}
 
     sanitized = DeterminismInterceptor.enforce_config(original_config)
 
@@ -38,9 +32,10 @@ def test_enforce_config_shallow_copy_behavior() -> None:
     # 2. Verify Nested Shared Reference (Shallow Copy)
     # If we modify the nested list in sanitized, it SHOULD reflect in original
     # because .copy() is shallow.
-    sanitized["nested"].append(4)  # type: ignore
-    assert len(original_config["nested"]) == 4  # type: ignore
-    assert original_config["nested"][-1] == 4  # type: ignore
+    sanitized["nested"].append(4)
+    nested = cast(List[int], original_config["nested"])
+    assert len(nested) == 4
+    assert nested[-1] == 4
 
 
 def test_enforce_config_custom_mapping() -> None:
@@ -48,7 +43,8 @@ def test_enforce_config_custom_mapping() -> None:
     Test enforce_config with a UserDict (custom mapping).
     Ensures .copy() works on dict-like objects.
     """
-    class MyConfig(UserDict):  # type: ignore
+
+    class MyConfig(UserDict[str, float]):
         pass
 
     original = MyConfig({"temperature": 0.5, "top_p": 0.8})
