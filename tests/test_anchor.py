@@ -8,9 +8,10 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import pytest
-from typing import Dict, Any
+from typing import Any, Dict
+
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
+
 
 def test_enforce_config_defaults() -> None:
     """Test that enforce_config applies defaults to an empty config."""
@@ -24,15 +25,11 @@ def test_enforce_config_defaults() -> None:
     # Ensure original is not modified
     assert config == {}
 
+
 def test_enforce_config_override() -> None:
     """Test that enforce_config overrides unsafe values."""
     interceptor = DeterminismInterceptor()
-    config = {
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "seed": 123,
-        "other_param": "value"
-    }
+    config = {"temperature": 0.7, "top_p": 0.9, "seed": 123, "other_param": "value"}
     sanitized = interceptor.enforce_config(config)
 
     assert sanitized["temperature"] == 0.0
@@ -40,19 +37,17 @@ def test_enforce_config_override() -> None:
     assert sanitized["seed"] == 42
     assert sanitized["other_param"] == "value"
 
+
 def test_enforce_config_compliant() -> None:
     """Test that enforce_config handles already compliant values without change."""
     interceptor = DeterminismInterceptor()
-    config = {
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "seed": 42
-    }
+    config = {"temperature": 0.0, "top_p": 1.0, "seed": 42}
     sanitized = interceptor.enforce_config(config)
 
     assert sanitized["temperature"] == 0.0
     assert sanitized["top_p"] == 1.0
     assert sanitized["seed"] == 42
+
 
 def test_scope_activation() -> None:
     """Test that the scope context manager sets the active flag."""
@@ -64,6 +59,7 @@ def test_scope_activation() -> None:
         assert is_anchor_active() is True
 
     assert is_anchor_active() is False
+
 
 def test_scope_nested() -> None:
     """Test nested scopes work correctly."""
@@ -78,6 +74,7 @@ def test_scope_nested() -> None:
         assert is_anchor_active() is True
 
     assert is_anchor_active() is False
+
 
 def test_scope_exception() -> None:
     """Test that the flag is reset even if an exception occurs."""

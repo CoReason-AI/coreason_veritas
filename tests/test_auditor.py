@@ -8,11 +8,14 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import pytest
+from typing import Generator
 from unittest.mock import MagicMock, patch
-from typing import Generator, Any
-from coreason_veritas.auditor import IERLogger
+
+import pytest
+
 from coreason_veritas.anchor import DeterminismInterceptor
+from coreason_veritas.auditor import IERLogger
+
 
 @pytest.fixture  # type: ignore[misc]
 def mock_tracer() -> Generator[MagicMock, None, None]:
@@ -21,15 +24,12 @@ def mock_tracer() -> Generator[MagicMock, None, None]:
         mock_get_tracer.return_value = mock_tracer_instance
         yield mock_tracer_instance
 
+
 def test_start_governed_span_attributes(mock_tracer: MagicMock) -> None:
     """Test that start_governed_span adds attributes and creates a span."""
     logger = IERLogger("test-service")
 
-    attributes = {
-        "co.user_id": "user-123",
-        "co.asset_id": "asset-456",
-        "co.srb_sig": "sig-789"
-    }
+    attributes = {"co.user_id": "user-123", "co.asset_id": "asset-456", "co.srb_sig": "sig-789"}
 
     # Mock the context manager returned by start_as_current_span
     mock_span = MagicMock()
@@ -49,6 +49,7 @@ def test_start_governed_span_attributes(mock_tracer: MagicMock) -> None:
     assert called_attributes["co.srb_sig"] == "sig-789"
     # Anchor is inactive by default
     assert called_attributes["co.determinism_verified"] == "False"
+
 
 def test_start_governed_span_with_anchor(mock_tracer: MagicMock) -> None:
     """Test that co.determinism_verified is True when Anchor is active."""

@@ -9,16 +9,19 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import pytest
-from coreason_veritas.exceptions import AssetTamperedError
 from cryptography.hazmat.primitives import hashes
 from opentelemetry import trace
 from pydantic import BaseModel
+
+from coreason_veritas.exceptions import AssetTamperedError
+
 
 def test_dependencies_installed() -> None:
     """Verify that all added dependencies are importable."""
     assert hashes.SHA256
     assert trace.get_tracer
     assert BaseModel
+
 
 def test_exception_import() -> None:
     """Verify that the custom exception is importable and usable."""
