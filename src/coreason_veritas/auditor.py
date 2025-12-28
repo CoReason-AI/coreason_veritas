@@ -63,10 +63,16 @@ class IERLogger:
         lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
         # Attach to standard Python logging
-        handler = LoggingHandler(level=logging.INFO, logger_provider=lp)
         self.logger = logging.getLogger("coreason.veritas")
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+
+        # Check if LoggingHandler is already attached to avoid duplicates/memory leaks
+        # We use class name check to support Mock objects in tests where isinstance fails
+        has_logging_handler = any(h.__class__.__name__ == "LoggingHandler" for h in self.logger.handlers)
+
+        if not has_logging_handler:
+            handler = LoggingHandler(level=logging.INFO, logger_provider=lp)
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
 
     def emit_handshake(self, version: str) -> None:
         """
