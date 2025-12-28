@@ -39,6 +39,10 @@ def governed_execution(
 
 Validates the cryptographic chain of custody for Agent Specs and Charters.
 
+**Technical Specifications:**
+*   **Algorithm:** SHA256 hashing with RSA-PSS padding (MGF1).
+*   **Canonicalization:** JSON payloads are sorted by keys before hashing.
+
 #### `__init__`
 
 ```python
@@ -80,7 +84,7 @@ Acts as a proxy/hook into LLM Client configurations to enforce the "Lobotomy Pro
 
 #### `enforce_config`
 
-Sanitizes a configuration dictionary to enforce deterministic parameters.
+Sanitizes a configuration dictionary to enforce deterministic parameters (The "Lobotomy Protocol").
 
 ```python
 def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]
@@ -147,6 +151,18 @@ def __init__(self, service_name: str = "coreason-veritas")
 **Parameters:**
 
 *   `service_name` (*str*): The name of the service for the tracer. Defaults to `"coreason-veritas"`.
+
+#### `emit_handshake`
+
+Emits a structured Log Record ("Handshake") confirming the engine version.
+
+```python
+def emit_handshake(self, version: str)
+```
+
+**Parameters:**
+
+*   `version` (*str*): The version of the `coreason_veritas` package.
 
 #### `start_governed_span`
 

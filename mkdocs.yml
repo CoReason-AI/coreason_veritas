@@ -21,4 +21,5 @@ nav:
   - Operations Manual: operations.md
   - Cookbook: cookbook.md
   - API Reference: api.md
+  - Package Specification: specification.md
   - Contributing: contributing.md
