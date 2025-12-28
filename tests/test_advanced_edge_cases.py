@@ -11,7 +11,7 @@
 import asyncio
 import json
 import os
-from typing import Any, Dict, Tuple, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,12 +19,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
-from coreason_veritas.anchor import is_anchor_active, DeterminismInterceptor
-from coreason_veritas.auditor import IERLogger
-from coreason_veritas.wrapper import governed_execution
+from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
+from coreason_veritas.wrapper import governed_execution
 
 # --- Fixtures & Helpers ---
+
 
 @pytest.fixture  # type: ignore[misc]
 def key_pair() -> Tuple[RSAPrivateKey, str]:
@@ -41,6 +41,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
     return private_key, pem_public
 
+
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
     canonical_payload = json.dumps(payload, sort_keys=True).encode()
@@ -51,7 +52,9 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     )
     return str(signature.hex())
 
+
 # --- Tests ---
+
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -138,11 +141,11 @@ async def test_blast_radius_error_tracing(key_pair: Tuple[RSAPrivateKey, str]) -
             # Create separate mock objects for the context managers
             outer_span_ctx = MagicMock()
             outer_span_ctx.__enter__.return_value = MagicMock(name="outer_span")
-            outer_span_ctx.__exit__.return_value = None # Allow propagation
+            outer_span_ctx.__exit__.return_value = None  # Allow propagation
 
             inner_span_ctx = MagicMock()
             inner_span_ctx.__enter__.return_value = MagicMock(name="inner_span")
-            inner_span_ctx.__exit__.return_value = None # Allow propagation
+            inner_span_ctx.__exit__.return_value = None  # Allow propagation
 
             # IMPORTANT: Define the sequence of returned context managers
             # 1st call -> Outer, 2nd call -> Inner
@@ -165,12 +168,12 @@ async def test_blast_radius_error_tracing(key_pair: Tuple[RSAPrivateKey, str]) -
             # Verify Outer Span exited with exception
             outer_exit_args = outer_span_ctx.__exit__.call_args
             assert outer_exit_args is not None
-            assert outer_exit_args[0][0] == ValueError # exc_type
+            assert outer_exit_args[0][0] is ValueError  # exc_type
 
-             # Verify Inner Span exited with exception
+            # Verify Inner Span exited with exception
             inner_exit_args = inner_span_ctx.__exit__.call_args
             assert inner_exit_args is not None
-            assert inner_exit_args[0][0] == ValueError # exc_type
+            assert inner_exit_args[0][0] is ValueError  # exc_type
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -183,10 +186,10 @@ async def test_generator_interruption_cleanup(key_pair: Tuple[RSAPrivateKey, str
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-
-        with patch("coreason_veritas.wrapper.IERLogger") as MockIERLogger, \
-             patch("coreason_veritas.wrapper.DeterminismInterceptor") as MockAnchor:
-
+        with (
+            patch("coreason_veritas.wrapper.IERLogger") as MockIERLogger,
+            patch("coreason_veritas.wrapper.DeterminismInterceptor") as MockAnchor,
+        ):
             mock_span_ctx = MagicMock()
             MockIERLogger.return_value.start_governed_span.return_value = mock_span_ctx
 
