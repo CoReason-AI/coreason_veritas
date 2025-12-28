@@ -12,7 +12,7 @@ import contextlib
 import logging
 import os
 import platform
-from typing import Dict, Generator, Optional, Any
+from typing import Any, Dict, Generator, Optional
 
 from loguru import logger as loguru_logger
 from opentelemetry import _logs, trace
