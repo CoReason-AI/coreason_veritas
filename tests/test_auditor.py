@@ -83,3 +83,60 @@ def test_start_governed_span_missing_attributes(mock_tracer: MagicMock) -> None:
 
     # Ensure no span was started
     mock_tracer.start_as_current_span.assert_not_called()
+
+def test_start_governed_span_non_string_attributes(mock_tracer: MagicMock) -> None:
+    """
+    Test that start_governed_span handles non-string attribute values.
+    The implementation copies attributes and the OTel tracer usually handles conversion,
+    but our code assumes strict matching for mandatory attributes.
+    """
+    logger = IERLogger("test-service")
+
+    # Pass int and bool
+    attributes = {"co.user_id": 123, "co.asset_id": "asset-456", "co.srb_sig": "sig-789", "custom": True}
+
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    # It takes Dict[str, str] in hint but implementation uses `attributes.copy()`.
+    # It should work as long as mandatory keys exist.
+    with logger.start_governed_span("test-span", attributes): # type: ignore
+        pass
+
+    mock_tracer.start_as_current_span.assert_called_once()
+    called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
+
+    # Check that mandatory values are preserved (as provided)
+    assert called_attributes["co.user_id"] == 123
+    assert called_attributes["custom"] is True
+
+
+def test_start_governed_span_none_attributes(mock_tracer: MagicMock) -> None:
+    """Test behavior when attributes contain None."""
+    logger = IERLogger("test-service")
+    attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s", "nullable": None}
+
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    with logger.start_governed_span("test-span", attributes): # type: ignore
+        pass
+
+    called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
+    assert called_attributes["nullable"] is None
+
+
+def test_start_governed_span_special_service_name(mock_tracer: MagicMock) -> None:
+    """Test initialization with special characters in service name."""
+    special_name = "service-with-weird-chars-!@#$%^&*()"
+    logger = IERLogger(special_name)
+
+    attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s"}
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    with logger.start_governed_span("test", attributes):
+        pass
+
+    # The tracer is mocked, but we verify it didn't crash on init
+    assert logger.tracer is not None

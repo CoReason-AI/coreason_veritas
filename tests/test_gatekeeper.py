@@ -147,3 +147,57 @@ def test_verify_asset_complex_nested_payload(key_pair: Tuple[RSAPrivateKey, str]
     payload_reordered["config"] = payload["config"]
 
     assert validator.verify_asset(payload_reordered, signature) is True
+
+def test_verify_asset_empty_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification of an empty dictionary payload."""
+    private_key, public_key_pem = key_pair
+    payload = {}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    assert validator.verify_asset(payload, signature) is True
+
+
+def test_verify_asset_none_values(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification of a payload containing None values."""
+    private_key, public_key_pem = key_pair
+    payload = {"key": None, "nested": {"inner": None}}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    assert validator.verify_asset(payload, signature) is True
+
+
+def test_verify_asset_whitespace_key(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification with a public key containing extra whitespace."""
+    private_key, public_key_pem = key_pair
+    payload = {"agent": "veritas"}
+    signature = sign_payload(payload, private_key)
+
+    # Add extra newlines and spaces to the key
+    messy_key = f"\n  {public_key_pem}  \n\n"
+    validator = SignatureValidator(messy_key)
+    assert validator.verify_asset(payload, signature) is True
+
+
+def test_verify_asset_malformed_signature_odd_length(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification fails with an odd-length hex signature."""
+    _, public_key_pem = key_pair
+    payload = {"agent": "veritas"}
+
+    validator = SignatureValidator(public_key_pem)
+    # Hex strings must be even length
+    with pytest.raises(AssetTamperedError) as excinfo:
+        validator.verify_asset(payload, "123")
+    assert "Signature verification failed" in str(excinfo.value)
+
+
+def test_verify_asset_malformed_signature_non_hex(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification fails with non-hex characters in signature."""
+    _, public_key_pem = key_pair
+    payload = {"agent": "veritas"}
+
+    validator = SignatureValidator(public_key_pem)
+    with pytest.raises(AssetTamperedError) as excinfo:
+        validator.verify_asset(payload, "zzzz")
+    assert "Signature verification failed" in str(excinfo.value)

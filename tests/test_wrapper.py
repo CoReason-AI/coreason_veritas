@@ -265,3 +265,68 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
             args_inner, kwargs_inner = calls[1]
             assert args_inner[0] == "inner_function"
             assert kwargs_inner["attributes"]["co.asset_id"] == str(payload_inner)
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test that calling the governed function with positional arguments fails
+    because the wrapper expects keyword arguments for verification.
+    """
+    private_key, public_key_pem = key_pair
+    payload = {"data": "secure"}
+    signature = sign_payload(payload, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                return "OK"
+
+            # Passing arguments positionally
+            # wrapper looks for kwargs.get("spec") etc., which will be None
+            with pytest.raises(ValueError, match="Missing signature argument"):
+                 # This simulates `protected_function(payload, signature, "u")`
+                 # but since we are calling the wrapper, we pass them as positional args to the wrapper
+                 await protected_function(payload, signature, "user-123")
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test recursive calls to a governed function.
+    Each recursive step should start its own span and verify signatures independently.
+    """
+    private_key, public_key_pem = key_pair
+
+    # We need a payload that can decrease to base case
+    payload = {"count": 3}
+    signature = sign_payload(payload, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def recursive_function(spec: Dict[str, Any], sig: str, user: str) -> int:
+                count = spec["count"]
+                if count <= 0:
+                    return 0
+
+                # Create next payload
+                next_payload = {"count": count - 1}
+                next_sig = sign_payload(next_payload, private_key)
+
+                # Recursive call
+                return 1 + await recursive_function(spec=next_payload, sig=next_sig, user=user)
+
+            result = await recursive_function(spec=payload, sig=signature, user="recurse-user")
+            assert result == 3
+
+            # Verify spans: 3 (recursive) + 1 (initial) = 4 calls
+            assert mock_tracer.start_as_current_span.call_count == 4
