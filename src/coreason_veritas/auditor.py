@@ -11,6 +11,7 @@
 import contextlib
 import logging
 import os
+import platform
 from typing import Dict, Generator
 
 from loguru import logger
@@ -45,7 +46,7 @@ class IERLogger:
             {
                 "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
                 "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
-                "host.name": os.uname().nodename,
+                "host.name": platform.node(),
             }
         )
 
