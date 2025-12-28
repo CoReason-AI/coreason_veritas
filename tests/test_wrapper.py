@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
+import inspect
 import json
 import os
 from typing import Any, Dict, Tuple
@@ -61,21 +62,20 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
         payload = {"data": "secure"}
         signature = sign_payload(payload, private_key)
 
-        # Mock IERLogger to avoid needing OTel setup (covered in other tests)
-        # However, we want to verify the integration, so we'll mock the internal tracer
+        # Mock IERLogger to avoid needing OTel setup
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig")
-            async def protected_function(spec: Dict[str, Any], sig: str, other_arg: str) -> str:
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def protected_function(spec: Dict[str, Any], sig: str, user: str, other_arg: str) -> str:
                 # Verify Anchor is active inside
                 assert is_anchor_active() is True
                 return f"Processed {other_arg}"
 
-            result = await protected_function(spec=payload, sig=signature, other_arg="test")
+            result = await protected_function(spec=payload, sig=signature, user="user-123", other_arg="test")
 
             assert result == "Processed test"
 
@@ -83,9 +83,10 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
             mock_tracer.start_as_current_span.assert_called_once()
             args, kwargs = mock_tracer.start_as_current_span.call_args
             assert args[0] == "protected_function"
-            assert kwargs["attributes"]["co.asset_id"] == str(payload)
-            # Anchor active check happens inside IERLogger.start_governed_span
-            # We can't easily check it here without more mocking, but we checked is_anchor_active() inside the function.
+            attributes = kwargs["attributes"]
+            assert attributes["co.asset_id"] == str(payload)
+            assert attributes["co.user_id"] == "user-123"
+            assert attributes["co.srb_sig"] == signature
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -98,12 +99,12 @@ async def test_governed_execution_tampered(key_pair: Tuple[RSAPrivateKey, str]) 
         signature = sign_payload(payload, private_key)
         tampered_payload = {"data": "hacked"}
 
-        @governed_execution(asset_id_arg="spec", signature_arg="sig")
-        async def protected_function(spec: Dict[str, Any], sig: str) -> str:
+        @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+        async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
             return "Should not reach here"
 
         with pytest.raises(AssetTamperedError):
-            await protected_function(spec=tampered_payload, sig=signature)
+            await protected_function(spec=tampered_payload, sig=signature, user="user-123")
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -116,35 +117,36 @@ async def test_governed_execution_missing_key_store(key_pair: Tuple[RSAPrivateKe
     # Ensure env var is unset
     with patch.dict(os.environ, {}, clear=True):
 
-        @governed_execution(asset_id_arg="spec", signature_arg="sig")
-        async def protected_function(spec: Dict[str, Any], sig: str) -> str:
+        @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+        async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
             return "Should not reach here"
 
         with pytest.raises(ValueError, match="COREASON_VERITAS_PUBLIC_KEY"):
-            await protected_function(spec=payload, sig=signature)
+            await protected_function(spec=payload, sig=signature, user="user-123")
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_missing_args(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test failure if required arguments are missing."""
 
-    @governed_execution(asset_id_arg="spec", signature_arg="sig")
-    async def protected_function(spec: Any, sig: Any) -> str:
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+    async def protected_function(spec: Any, sig: Any, user: Any) -> str:
         return "Should not reach here"
 
     with pytest.raises(ValueError, match="Missing signature argument"):
-        await protected_function(spec={"a": 1})  # Missing sig
+        await protected_function(spec={"a": 1}, user="u")  # Missing sig
 
     with pytest.raises(ValueError, match="Missing asset argument"):
-        await protected_function(sig="abc")  # Missing spec
+        await protected_function(sig="abc", user="u")  # Missing spec
+
+    with pytest.raises(ValueError, match="Missing user ID argument"):
+        await protected_function(spec={"a": 1}, sig="abc")  # Missing user
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test that concurrent executions maintain isolated Anchor states.
-    We run a governed function concurrent with a non-governed function
-    and ensure the non-governed one sees Anchor as inactive.
     """
     private_key, public_key_pem = key_pair
 
@@ -158,8 +160,8 @@ async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str
             mock_span = MagicMock()
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-            @governed_execution(asset_id_arg="spec", signature_arg="sig")
-            async def governed_task(spec: Dict[str, Any], sig: str) -> bool:
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def governed_task(spec: Dict[str, Any], sig: str, user: str) -> bool:
                 await asyncio.sleep(0.05)  # Yield control
                 return is_anchor_active()
 
@@ -168,7 +170,7 @@ async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str
                 return is_anchor_active()
 
             # Run both concurrently
-            task1 = asyncio.create_task(governed_task(spec=payload, sig=signature))
+            task1 = asyncio.create_task(governed_task(spec=payload, sig=signature, user="u1"))
             task2 = asyncio.create_task(ungoverned_task())
 
             is_active_governed, is_active_ungoverned = await asyncio.gather(task1, task2)
@@ -193,16 +195,175 @@ async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateK
             mock_span = MagicMock()
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-            # Configure mock span to support context manager behavior fully if needed
-            # start_as_current_span handles exception automatically by OTel design,
-            # we just want to ensure it was called.
-
-            @governed_execution(asset_id_arg="spec", signature_arg="sig")
-            async def failing_function(spec: Dict[str, Any], sig: str) -> None:
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def failing_function(spec: Dict[str, Any], sig: str, user: str) -> None:
                 raise RuntimeError("Planned failure")
 
             with pytest.raises(RuntimeError, match="Planned failure"):
-                await failing_function(spec=payload, sig=signature)
+                await failing_function(spec=payload, sig=signature, user="u1")
 
             # Verify Auditor was still called (span started)
+            mock_tracer.start_as_current_span.assert_called_once()
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test nested governed executions (Outer -> Inner).
+    Verifies that both layers perform Gatekeeper checks, maintain Anchor state,
+    and generate independent Audit spans.
+    """
+    private_key, public_key_pem = key_pair
+
+    # 1. Prepare Data for Outer and Inner layers
+    payload_outer = {"layer": "outer"}
+    sig_outer = sign_payload(payload_outer, private_key)
+
+    payload_inner = {"layer": "inner"}
+    sig_inner = sign_payload(payload_inner, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        # Mock Tracer
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_span = MagicMock()
+            # Support context manager enter/exit
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+            # 2. Define Nested Functions
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def inner_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                assert is_anchor_active() is True
+                return "inner_result"
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def outer_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                assert is_anchor_active() is True
+                # Call Inner
+                inner_res = await inner_function(spec=payload_inner, sig=sig_inner, user=user)
+                return f"outer_processed_{inner_res}"
+
+            # 3. Execute
+            result = await outer_function(spec=payload_outer, sig=sig_outer, user="user-nested")
+
+            # 4. Verification
+            assert result == "outer_processed_inner_result"
+
+            # Check Spans
+            # Expecting 2 calls to start_as_current_span
+            assert mock_tracer.start_as_current_span.call_count == 2
+
+            calls = mock_tracer.start_as_current_span.call_args_list
+
+            # The order of calls depends on execution. Outer starts first, then Inner.
+            # Call 1: Outer
+            args_outer, kwargs_outer = calls[0]
+            assert args_outer[0] == "outer_function"
+            assert kwargs_outer["attributes"]["co.asset_id"] == str(payload_outer)
+
+            # Call 2: Inner
+            args_inner, kwargs_inner = calls[1]
+            assert args_inner[0] == "inner_function"
+            assert kwargs_inner["attributes"]["co.asset_id"] == str(payload_inner)
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test that calling the governed function with positional arguments fails
+    because the wrapper expects keyword arguments for verification.
+    """
+    private_key, public_key_pem = key_pair
+    payload = {"data": "secure"}
+    signature = sign_payload(payload, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                return "OK"
+
+            # Passing arguments positionally
+            # wrapper looks for kwargs.get("spec") etc., which will be None
+            with pytest.raises(ValueError, match="Missing signature argument"):
+                # This simulates `protected_function(payload, signature, "u")`
+                # but since we are calling the wrapper, we pass them as positional args to the wrapper
+                await protected_function(payload, signature, "user-123")
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test recursive calls to a governed function.
+    Each recursive step should start its own span and verify signatures independently.
+    """
+    private_key, public_key_pem = key_pair
+
+    # We need a payload that can decrease to base case
+    payload = {"count": 3}
+    signature = sign_payload(payload, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def recursive_function(spec: Dict[str, Any], sig: str, user: str) -> int:
+                count = spec["count"]
+                if count <= 0:
+                    return 0
+
+                # Create next payload
+                next_payload = {"count": count - 1}
+                next_sig = sign_payload(next_payload, private_key)
+
+                # Recursive call
+                res: int = await recursive_function(spec=next_payload, sig=next_sig, user=user)
+                return 1 + res
+
+            result = await recursive_function(spec=payload, sig=signature, user="recurse-user")
+            assert result == 3
+
+            # Verify spans: 3 (recursive) + 1 (initial) = 4 calls
+            assert mock_tracer.start_as_current_span.call_count == 4
+
+
+def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test that governed_execution supports synchronous functions.
+    This test runs synchronously (no async def).
+    """
+    private_key, public_key_pem = key_pair
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        payload = {"data": "sync"}
+        signature = sign_payload(payload, private_key)
+
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_span = MagicMock()
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            def sync_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                # Ensure Anchor is active
+                assert is_anchor_active() is True
+                return "sync_result"
+
+            # Verify that the wrapper maintained it as sync (not coroutine)
+            assert not inspect.iscoroutinefunction(sync_function)
+
+            # Call synchronously
+            result = sync_function(spec=payload, sig=signature, user="user-sync")
+            assert result == "sync_result"
+
+            # Verify Auditor
             mock_tracer.start_as_current_span.assert_called_once()

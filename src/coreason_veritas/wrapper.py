@@ -8,9 +8,10 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import inspect
 import os
 from functools import wraps
-from typing import Any, Callable
+from typing import Any, Callable, Dict, Optional
 
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
@@ -28,52 +29,108 @@ def get_public_key_from_store() -> str:
     return key
 
 
-def governed_execution(asset_id_arg: str, signature_arg: str) -> Callable[..., Any]:
+def governed_execution(
+    asset_id_arg: str, signature_arg: str, user_id_arg: str, config_arg: Optional[str] = None
+) -> Callable[..., Any]:
     """
     Decorator that bundles Gatekeeper, Auditor, and Anchor into a single atomic wrapper.
 
     Args:
         asset_id_arg: The name of the keyword argument containing the asset/spec.
         signature_arg: The name of the keyword argument containing the signature.
+        user_id_arg: The name of the keyword argument containing the user ID.
+        config_arg: Optional name of the keyword argument containing the configuration dict to be sanitized.
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def _perform_gatekeeping(kwargs: Dict[str, Any]) -> Dict[str, str]:
             # 1. Gatekeeper Check
             sig = kwargs.get(signature_arg)
             asset = kwargs.get(asset_id_arg)
+            user_id = kwargs.get(user_id_arg)
 
             if sig is None:
                 raise ValueError(f"Missing signature argument: {signature_arg}")
             if asset is None:
                 raise ValueError(f"Missing asset argument: {asset_id_arg}")
+            if user_id is None:
+                raise ValueError(f"Missing user ID argument: {user_id_arg}")
 
             # Retrieve key from store (Env Var)
             public_key = get_public_key_from_store()
             SignatureValidator(public_key).verify_asset(asset, sig)
 
-            # 2. Start Audit Span
-            # Note: func.__name__ is used as span name
-            # asset is passed as an attribute. The spec example passed {"asset": asset}
-            # which maps to `co.asset_id` in our Auditor logic (though we pass it as 'asset' here,
-            # IERLogger creates span with provided attributes.
-            # To be strictly compliant with Auditor "Mandatory Attributes", we should map it.
-            # However, the spec usage example was explicit: `{"asset": asset}`.
-            # I'll pass it as is, but maybe I should map it to `co.asset_id`?
-            # The Auditor spec says `co.asset_id` is mandatory.
-            # I will pass `co.asset_id` as well.
-
-            attributes = {
-                "asset": str(asset),  # As per example
-                "co.asset_id": str(asset),  # For strict compliance
+            # Prepare attributes for Auditor
+            return {
+                "asset": str(asset),  # Legacy support from spec example
+                "co.asset_id": str(asset),
+                "co.user_id": str(user_id),
+                "co.srb_sig": str(sig),
             }
 
-            with IERLogger().start_governed_span(func.__name__, attributes):
-                # 3. Anchor Context (Context Manager)
-                with DeterminismInterceptor().scope():
-                    return await func(*args, **kwargs)
+        def _sanitize_kwargs(kwargs: Dict[str, Any]) -> None:
+            """
+            If config_arg is specified, find it in kwargs, sanitize it, and update kwargs.
+            """
+            if config_arg and config_arg in kwargs:
+                original_config = kwargs[config_arg]
+                if isinstance(original_config, dict):
+                    sanitized_config = DeterminismInterceptor.enforce_config(original_config)
+                    kwargs[config_arg] = sanitized_config
 
-        return wrapper
+        if inspect.isasyncgenfunction(func):
+
+            @wraps(func)
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                attributes = _perform_gatekeeping(kwargs)
+                _sanitize_kwargs(kwargs)
+                with IERLogger().start_governed_span(func.__name__, attributes):
+                    with DeterminismInterceptor.scope():
+                        async for item in func(*args, **kwargs):
+                            yield item
+
+            return wrapper
+
+        elif inspect.isgeneratorfunction(func):
+
+            @wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                attributes = _perform_gatekeeping(kwargs)
+                _sanitize_kwargs(kwargs)
+                with IERLogger().start_governed_span(func.__name__, attributes):
+                    with DeterminismInterceptor.scope():
+                        yield from func(*args, **kwargs)
+
+            return wrapper
+
+        elif inspect.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                attributes = _perform_gatekeeping(kwargs)
+                _sanitize_kwargs(kwargs)
+
+                # 2. Start Audit Span
+                with IERLogger().start_governed_span(func.__name__, attributes):
+                    # 3. Anchor Context (Context Manager)
+                    with DeterminismInterceptor.scope():
+                        return await func(*args, **kwargs)
+
+            return wrapper
+
+        else:
+
+            @wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                attributes = _perform_gatekeeping(kwargs)
+                _sanitize_kwargs(kwargs)
+
+                # 2. Start Audit Span
+                with IERLogger().start_governed_span(func.__name__, attributes):
+                    # 3. Anchor Context (Context Manager)
+                    with DeterminismInterceptor.scope():
+                        return func(*args, **kwargs)
+
+            return wrapper
 
     return decorator

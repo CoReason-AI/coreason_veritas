@@ -9,14 +9,73 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
-import sys
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict
 
-from loguru import logger
+import httpx
+import uvicorn
+from fastapi import FastAPI, Request
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-logger.remove()
-logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
+from coreason_veritas.anchor import DeterminismInterceptor
 
 
-def hello_world() -> str:
-    logger.info("Hello World!")
-    return "Hello World!"
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    Manage the lifecycle of the FastAPI application.
+    Initializes a shared HTTP client on startup and closes it on shutdown.
+    """
+    app.state.http_client = httpx.AsyncClient()
+    yield
+    await app.state.http_client.aclose()
+
+
+app = FastAPI(title="CoReason Veritas Gateway", lifespan=lifespan)
+
+# Configuration from Environment Variables
+LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "https://api.openai.com/v1/chat/completions")
+
+
+@app.post("/v1/chat/completions")  # type: ignore[misc]
+async def governed_inference(request: Request) -> Dict[str, Any]:
+    """
+    Gateway Proxy endpoint that enforces determinism and forwards requests to the LLM provider.
+    """
+    # 1. Parse Request
+    raw_body = await request.json()
+    headers = dict(request.headers)
+
+    # 2. Anchor Check: Enforce Determinism
+    governed_body = DeterminismInterceptor.enforce_config(raw_body)
+
+    # 3. Proxy: Forward to LLM Provider
+    # We only forward essential headers like Authorization
+    proxy_headers = {}
+    if "authorization" in headers:
+        proxy_headers["Authorization"] = headers["authorization"]
+
+    client: httpx.AsyncClient = request.app.state.http_client
+    resp = await client.post(
+        LLM_PROVIDER_URL,
+        json=governed_body,
+        headers=proxy_headers,
+        timeout=60.0,
+    )
+    # We return the JSON response from the provider
+    return resp.json()  # type: ignore[no-any-return]
+
+
+# Instrument the app
+FastAPIInstrumentor.instrument_app(app)
+
+
+def run_server() -> None:
+    """Entry point for the veritas-proxy command. Configured via ENV."""
+    host = os.environ.get("VERITAS_HOST", "0.0.0.0")
+    port = int(os.environ.get("VERITAS_PORT", "8080"))
+    uvicorn.run(app, host=host, port=port)
+
+
+if __name__ == "__main__":
+    run_server()  # pragma: no cover
