@@ -71,7 +71,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
                 with IERLogger().start_governed_span(func.__name__, attributes):
-                    with DeterminismInterceptor().scope():
+                    with DeterminismInterceptor.scope():
                         async for item in func(*args, **kwargs):
                             yield item
 
@@ -83,7 +83,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 attributes = _perform_gatekeeping(kwargs)
                 with IERLogger().start_governed_span(func.__name__, attributes):
-                    with DeterminismInterceptor().scope():
+                    with DeterminismInterceptor.scope():
                         yield from func(*args, **kwargs)
 
             return wrapper
@@ -97,7 +97,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                 # 2. Start Audit Span
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     # 3. Anchor Context (Context Manager)
-                    with DeterminismInterceptor().scope():
+                    with DeterminismInterceptor.scope():
                         return await func(*args, **kwargs)
 
             return wrapper
@@ -111,7 +111,7 @@ def governed_execution(asset_id_arg: str, signature_arg: str, user_id_arg: str) 
                 # 2. Start Audit Span
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     # 3. Anchor Context (Context Manager)
-                    with DeterminismInterceptor().scope():
+                    with DeterminismInterceptor.scope():
                         return func(*args, **kwargs)
 
             return wrapper
