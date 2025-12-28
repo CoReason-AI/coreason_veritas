@@ -8,6 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import logging
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
@@ -192,3 +193,73 @@ def test_start_governed_span_none_attributes(mock_exporters: None, mock_tracer: 
 
     called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
     assert called_attributes["nullable"] is None
+
+
+def test_start_governed_span_extra_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
+    """Test that extra attributes are passed through."""
+    logger = IERLogger("test-service")
+    attributes = {
+        "co.user_id": "u",
+        "co.asset_id": "a",
+        "co.srb_sig": "s",
+        "extra_1": "value1",
+        "extra_2": 123,
+    }
+
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    with logger.start_governed_span("test-span", attributes):
+        pass
+
+    called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
+    assert called_attributes["extra_1"] == "value1"
+    assert called_attributes["extra_2"] == 123
+
+
+def test_start_governed_span_empty_mandatory_values(mock_exporters: None, mock_tracer: MagicMock) -> None:
+    """
+    Test that empty strings for mandatory attributes are accepted if keys exist.
+    """
+    logger = IERLogger("test-service")
+    attributes = {"co.user_id": "", "co.asset_id": "", "co.srb_sig": ""}
+
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    with logger.start_governed_span("test-span", attributes):
+        pass
+
+    mock_tracer.start_as_current_span.assert_called_once()
+
+
+def test_initialization_env_var_precedence(
+    mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock, mock_exporters: None
+) -> None:
+    """Test that OTEL_SERVICE_NAME env var overrides constructor argument."""
+    with (
+        patch.dict("os.environ", {"OTEL_SERVICE_NAME": "env-service"}),
+        patch("coreason_veritas.auditor.trace.set_tracer_provider"),
+        patch("coreason_veritas.auditor._logs.set_logger_provider"),
+        patch("coreason_veritas.auditor.Resource.create") as mock_resource_create,
+    ):
+        IERLogger("arg-service")
+
+        # Verify resource creation used env var
+        mock_resource_create.assert_called_once()
+        args, _ = mock_resource_create.call_args
+        # Resource.create takes a dictionary as first arg
+        assert args[0]["service.name"] == "env-service"
+
+
+def test_logging_handler_attached(mock_exporters: None, mock_logger_provider: MagicMock) -> None:
+    """Test that the python logging handler is correctly attached."""
+    with (
+        patch("coreason_veritas.auditor.trace.set_tracer_provider"),
+        patch("coreason_veritas.auditor._logs.set_logger_provider"),
+    ):
+        logger_instance = IERLogger("test-service")
+
+        # Verify handler is attached to the internal logger
+        assert len(logger_instance.logger.handlers) > 0
+        assert isinstance(logger_instance.logger.handlers[0], logging.Handler)
