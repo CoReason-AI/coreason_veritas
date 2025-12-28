@@ -203,3 +203,65 @@ async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateK
 
             # Verify Auditor was still called (span started)
             mock_tracer.start_as_current_span.assert_called_once()
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test nested governed executions (Outer -> Inner).
+    Verifies that both layers perform Gatekeeper checks, maintain Anchor state,
+    and generate independent Audit spans.
+    """
+    private_key, public_key_pem = key_pair
+
+    # 1. Prepare Data for Outer and Inner layers
+    payload_outer = {"layer": "outer"}
+    sig_outer = sign_payload(payload_outer, private_key)
+
+    payload_inner = {"layer": "inner"}
+    sig_inner = sign_payload(payload_inner, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        # Mock Tracer
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_span = MagicMock()
+            # Support context manager enter/exit
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+            # 2. Define Nested Functions
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def inner_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                assert is_anchor_active() is True
+                return "inner_result"
+
+            @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+            async def outer_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+                assert is_anchor_active() is True
+                # Call Inner
+                inner_res = await inner_function(spec=payload_inner, sig=sig_inner, user=user)
+                return f"outer_processed_{inner_res}"
+
+            # 3. Execute
+            result = await outer_function(spec=payload_outer, sig=sig_outer, user="user-nested")
+
+            # 4. Verification
+            assert result == "outer_processed_inner_result"
+
+            # Check Spans
+            # Expecting 2 calls to start_as_current_span
+            assert mock_tracer.start_as_current_span.call_count == 2
+
+            calls = mock_tracer.start_as_current_span.call_args_list
+
+            # The order of calls depends on execution. Outer starts first, then Inner.
+            # Call 1: Outer
+            args_outer, kwargs_outer = calls[0]
+            assert args_outer[0] == "outer_function"
+            assert kwargs_outer["attributes"]["co.asset_id"] == str(payload_outer)
+
+            # Call 2: Inner
+            args_inner, kwargs_inner = calls[1]
+            assert args_inner[0] == "inner_function"
+            assert kwargs_inner["attributes"]["co.asset_id"] == str(payload_inner)
