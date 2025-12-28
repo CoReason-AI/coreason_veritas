@@ -9,10 +9,19 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import contextlib
+import logging
+import os
 from typing import Dict, Generator
 
 from loguru import logger
-from opentelemetry import trace
+from opentelemetry import trace, _logs
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
 from coreason_veritas.anchor import is_anchor_active
 
@@ -31,7 +40,45 @@ class IERLogger:
             service_name: The name of the service for the tracer.
                           Defaults to "coreason-veritas" if not provided.
         """
-        self.tracer = trace.get_tracer(service_name)
+        # 1. Resource Attributes: Generic metadata for client portability
+        resource = Resource.create({
+            "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
+            "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
+            "host.name": os.uname().nodename
+        })
+
+        # 2. Setup Tracing (for AI workflow logic)
+        tp = TracerProvider(resource=resource)
+        # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        trace.set_tracer_provider(tp)
+        self.tracer = trace.get_tracer("veritas.audit")
+
+        # 3. Setup Logging (for the Handshake and IER events)
+        lp = LoggerProvider(resource=resource)
+        _logs.set_logger_provider(lp)
+        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+
+        # Attach to standard Python logging
+        handler = LoggingHandler(level=logging.INFO, logger_provider=lp)
+        self.logger = logging.getLogger("coreason.veritas")
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
+
+    def emit_handshake(self, version: str) -> None:
+        """
+        Standardized GxP audit trail for package initialization.
+
+        Args:
+            version: The version string of the package.
+        """
+        self.logger.info(
+            "Veritas Engine Initialized",
+            extra={
+                "co.veritas.version": version,
+                "co.governance.status": "active"
+            }
+        )
 
     @contextlib.contextmanager
     def start_governed_span(self, name: str, attributes: Dict[str, str]) -> Generator[trace.Span, None, None]:

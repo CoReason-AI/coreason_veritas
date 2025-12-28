@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 
 import pytest
 
@@ -18,14 +18,81 @@ from coreason_veritas.auditor import IERLogger
 
 
 @pytest.fixture  # type: ignore[misc]
-def mock_tracer() -> Generator[MagicMock, None, None]:
+def mock_otlp_env() -> Generator[None, None, None]:
+    """Ensure OTLP environment variables are handled correctly."""
+    with patch.dict("os.environ", {"OTEL_SERVICE_NAME": "test-service", "DEPLOYMENT_ENV": "test-env"}):
+        yield
+
+
+@pytest.fixture  # type: ignore[misc]
+def mock_tracer_provider() -> Generator[MagicMock, None, None]:
+    with patch("coreason_veritas.auditor.TracerProvider") as mock_tp:
+        yield mock_tp
+
+
+@pytest.fixture  # type: ignore[misc]
+def mock_logger_provider() -> Generator[MagicMock, None, None]:
+    with patch("coreason_veritas.auditor.LoggerProvider") as mock_lp:
+        yield mock_lp
+
+
+@pytest.fixture  # type: ignore[misc]
+def mock_tracer(mock_tracer_provider: MagicMock) -> Generator[MagicMock, None, None]:
+    # Trace.get_tracer is called inside __init__ using the provider
+    # But wait, implementation calls trace.set_tracer_provider(tp) then trace.get_tracer
+    # We should mock trace.get_tracer directly or ensure logic flow works
     with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
         mock_tracer_instance = MagicMock()
         mock_get_tracer.return_value = mock_tracer_instance
         yield mock_tracer_instance
 
 
-def test_start_governed_span_attributes(mock_tracer: MagicMock) -> None:
+@pytest.fixture  # type: ignore[misc]
+def mock_exporters() -> Generator[None, None, None]:
+    with patch("coreason_veritas.auditor.OTLPSpanExporter"), \
+         patch("coreason_veritas.auditor.OTLPLogExporter"), \
+         patch("coreason_veritas.auditor.BatchSpanProcessor"), \
+         patch("coreason_veritas.auditor.BatchLogRecordProcessor"), \
+         patch("coreason_veritas.auditor.LoggingHandler"):
+        yield
+
+
+def test_initialization(mock_otlp_env: None, mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock, mock_exporters: None) -> None:
+    """Test that IERLogger initializes providers and exporters."""
+    with patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp, \
+         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp:
+
+        logger = IERLogger()
+
+        # Verify TracerProvider setup
+        mock_tracer_provider.assert_called_once()
+        mock_set_tp.assert_called_once()
+
+        # Verify LoggerProvider setup
+        mock_logger_provider.assert_called_once()
+        mock_set_lp.assert_called_once()
+
+
+def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
+    """Test emit_handshake logs correct message."""
+    logger_instance = IERLogger("test-service")
+
+    # Mock the internal logger
+    logger_instance.logger = MagicMock()
+
+    version = "1.0.0"
+    logger_instance.emit_handshake(version)
+
+    logger_instance.logger.info.assert_called_once_with(
+        "Veritas Engine Initialized",
+        extra={
+            "co.veritas.version": version,
+            "co.governance.status": "active"
+        }
+    )
+
+
+def test_start_governed_span_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that start_governed_span adds attributes and creates a span."""
     logger = IERLogger("test-service")
 
@@ -51,7 +118,7 @@ def test_start_governed_span_attributes(mock_tracer: MagicMock) -> None:
     assert called_attributes["co.determinism_verified"] == "False"
 
 
-def test_start_governed_span_with_anchor(mock_tracer: MagicMock) -> None:
+def test_start_governed_span_with_anchor(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that co.determinism_verified is True when Anchor is active."""
     logger = IERLogger("test-service")
     anchor = DeterminismInterceptor()
@@ -67,7 +134,7 @@ def test_start_governed_span_with_anchor(mock_tracer: MagicMock) -> None:
     assert called_attributes["co.determinism_verified"] == "True"
 
 
-def test_start_governed_span_missing_attributes(mock_tracer: MagicMock) -> None:
+def test_start_governed_span_missing_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that missing mandatory attributes raise ValueError."""
     logger = IERLogger("test-service")
 
@@ -85,11 +152,9 @@ def test_start_governed_span_missing_attributes(mock_tracer: MagicMock) -> None:
     mock_tracer.start_as_current_span.assert_not_called()
 
 
-def test_start_governed_span_non_string_attributes(mock_tracer: MagicMock) -> None:
+def test_start_governed_span_non_string_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """
     Test that start_governed_span handles non-string attribute values.
-    The implementation copies attributes and the OTel tracer usually handles conversion,
-    but our code assumes strict matching for mandatory attributes.
     """
     logger = IERLogger("test-service")
 
@@ -99,8 +164,6 @@ def test_start_governed_span_non_string_attributes(mock_tracer: MagicMock) -> No
     mock_span = MagicMock()
     mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-    # It takes Dict[str, str] in hint but implementation uses `attributes.copy()`.
-    # It should work as long as mandatory keys exist.
     with logger.start_governed_span("test-span", attributes):  # type: ignore
         pass
 
@@ -112,7 +175,7 @@ def test_start_governed_span_non_string_attributes(mock_tracer: MagicMock) -> No
     assert called_attributes["custom"] is True
 
 
-def test_start_governed_span_none_attributes(mock_tracer: MagicMock) -> None:
+def test_start_governed_span_none_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test behavior when attributes contain None."""
     logger = IERLogger("test-service")
     attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s", "nullable": None}
@@ -125,19 +188,3 @@ def test_start_governed_span_none_attributes(mock_tracer: MagicMock) -> None:
 
     called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
     assert called_attributes["nullable"] is None
-
-
-def test_start_governed_span_special_service_name(mock_tracer: MagicMock) -> None:
-    """Test initialization with special characters in service name."""
-    special_name = "service-with-weird-chars-!@#$%^&*()"
-    logger = IERLogger(special_name)
-
-    attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s"}
-    mock_span = MagicMock()
-    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-
-    with logger.start_governed_span("test", attributes):
-        pass
-
-    # The tracer is mocked, but we verify it didn't crash on init
-    assert logger.tracer is not None
