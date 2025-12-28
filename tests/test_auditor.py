@@ -55,12 +55,31 @@ def test_start_governed_span_with_anchor(mock_tracer: MagicMock) -> None:
     """Test that co.determinism_verified is True when Anchor is active."""
     logger = IERLogger("test-service")
     anchor = DeterminismInterceptor()
+    attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s"}
 
     with anchor.scope():
-        with logger.start_governed_span("test-span-anchor", {}):
+        with logger.start_governed_span("test-span-anchor", attributes):
             pass
 
     # Verify determinism flag
     mock_tracer.start_as_current_span.assert_called_once()
     called_attributes = mock_tracer.start_as_current_span.call_args[1]["attributes"]
     assert called_attributes["co.determinism_verified"] == "True"
+
+
+def test_start_governed_span_missing_attributes(mock_tracer: MagicMock) -> None:
+    """Test that missing mandatory attributes raise ValueError."""
+    logger = IERLogger("test-service")
+
+    # Missing all
+    with pytest.raises(ValueError, match="Missing mandatory attributes"):
+        with logger.start_governed_span("test-span", {}):
+            pass
+
+    # Missing one
+    with pytest.raises(ValueError, match="Missing mandatory attributes"):
+        with logger.start_governed_span("test-span", {"co.user_id": "u", "co.asset_id": "a"}):
+            pass
+
+    # Ensure no span was started
+    mock_tracer.start_as_current_span.assert_not_called()
