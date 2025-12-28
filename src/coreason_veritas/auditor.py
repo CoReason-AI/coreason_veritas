@@ -11,6 +11,7 @@
 import contextlib
 from typing import Dict, Generator
 
+from loguru import logger
 from opentelemetry import trace
 
 from coreason_veritas.anchor import is_anchor_active
@@ -46,12 +47,24 @@ class IERLogger:
         Args:
             name: The name of the span.
             attributes: Dictionary of attributes to add to the span.
+
+        Raises:
+            ValueError: If any mandatory attribute is missing.
         """
         # Prepare attributes
         span_attributes = attributes.copy()
 
         # Automatically check anchor status
         span_attributes["co.determinism_verified"] = str(is_anchor_active())
+
+        # Strict Enforcement of Mandatory Attributes
+        mandatory_attributes = ["co.user_id", "co.asset_id", "co.srb_sig"]
+        missing = [attr for attr in mandatory_attributes if attr not in span_attributes]
+
+        if missing:
+            error_msg = f"Audit Failure: Missing mandatory attributes: {missing}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
         with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
             yield span
