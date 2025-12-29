@@ -12,7 +12,8 @@ import contextlib
 import logging
 import os
 import platform
-from typing import Any, Dict, Generator, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 from loguru import logger as loguru_logger
 from opentelemetry import _logs, trace
@@ -91,7 +92,17 @@ class IERLogger:
             self.otel_bridge_logger.addHandler(handler)
             self.otel_bridge_logger.setLevel(logging.INFO)
 
+        self._sinks: List[Callable[[Dict[str, Any]], None]] = []
         self._initialized = True
+
+    def register_sink(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """
+        Register a new audit sink callback.
+
+        Args:
+            callback: A function that accepts a dictionary of audit events.
+        """
+        self._sinks.append(callback)
 
     def emit_handshake(self, version: str) -> None:
         """
@@ -130,7 +141,13 @@ class IERLogger:
         span_attributes["co.determinism_verified"] = str(is_anchor_active())
 
         # Strict Enforcement of Mandatory Attributes
-        mandatory_attributes = ["co.user_id", "co.asset_id", "co.srb_sig"]
+        mandatory_attributes = ["co.user_id", "co.asset_id"]
+
+        # If strictly compliant (default), require signature.
+        # If in DRAFT mode, signature is optional.
+        if span_attributes.get("co.compliance_mode") != "DRAFT":
+            mandatory_attributes.append("co.srb_sig")
+
         missing = [attr for attr in mandatory_attributes if attr not in span_attributes]
 
         if missing:
@@ -139,4 +156,18 @@ class IERLogger:
             raise ValueError(error_msg)
 
         with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
+            # Broadcast to external sinks (Glass Box)
+            timestamp = datetime.now(timezone.utc).isoformat()
+            event_payload = {
+                "span_name": name,
+                "attributes": span_attributes,
+                "timestamp": timestamp,
+            }
+            for sink in self._sinks:
+                try:
+                    sink(event_payload)
+                except Exception as e:
+                    # Suppress sink failures to protect the main application loop
+                    loguru_logger.error(f"Audit Sink Failure: {e}")
+
             yield span
