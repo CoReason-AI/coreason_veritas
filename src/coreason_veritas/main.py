@@ -17,6 +17,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
+import coreason_veritas
 from coreason_veritas.anchor import DeterminismInterceptor
 
 
@@ -26,6 +27,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Manage the lifecycle of the FastAPI application.
     Initializes a shared HTTP client on startup and closes it on shutdown.
     """
+    # Initialize the Veritas Engine (Auditor Handshake)
+    coreason_veritas.initialize()
+
     app.state.http_client = httpx.AsyncClient()
     yield
     await app.state.http_client.aclose()

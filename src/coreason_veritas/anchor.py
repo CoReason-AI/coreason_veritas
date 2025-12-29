@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import contextlib
+import copy
 from contextvars import ContextVar
 from typing import Any, Dict, Generator
 
@@ -44,7 +45,7 @@ class DeterminismInterceptor:
         Returns:
             The sanitized, deterministic configuration dictionary.
         """
-        sanitized = raw_config.copy()
+        sanitized = copy.deepcopy(raw_config)
 
         # Check for deviations to log warnings
         if sanitized.get("temperature") is not None and sanitized.get("temperature") != 0.0:
