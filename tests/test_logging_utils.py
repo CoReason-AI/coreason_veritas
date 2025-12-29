@@ -21,7 +21,7 @@ from coreason_veritas.logging_utils import (
 
 
 class TestLoggingUtils(unittest.TestCase):
-    def test_scrub_sensitive_data_dict(self):
+    def test_scrub_sensitive_data_dict(self) -> None:
         data = {
             "username": "alice",
             "password": "secret_password",
@@ -36,7 +36,7 @@ class TestLoggingUtils(unittest.TestCase):
         self.assertEqual(scrubbed["nested"]["token"], "[REDACTED]")
         self.assertEqual(scrubbed["nested"]["public"], "visible")
 
-    def test_scrub_sensitive_data_list(self):
+    def test_scrub_sensitive_data_list(self) -> None:
         data = [
             {"key": "secret_key", "id": 1},
             {"authorization": "Bearer xyz"},
@@ -46,25 +46,25 @@ class TestLoggingUtils(unittest.TestCase):
         self.assertEqual(scrubbed[0]["id"], 1)
         self.assertEqual(scrubbed[1]["authorization"], "[REDACTED]")
 
-    def test_scrub_sensitive_data_case_insensitive(self):
+    def test_scrub_sensitive_data_case_insensitive(self) -> None:
         data = {"PaSsWoRd": "secret"}
         scrubbed = scrub_sensitive_data(data)
         self.assertEqual(scrubbed["PaSsWoRd"], "[REDACTED]")
 
-    def test_scrub_sensitive_data_tuple(self):
+    def test_scrub_sensitive_data_tuple(self) -> None:
         data = ({"password": "secret"}, "public")
         scrubbed = scrub_sensitive_data(data)
         self.assertEqual(scrubbed[0]["password"], "[REDACTED]")
         self.assertEqual(scrubbed[1], "public")
         self.assertIsInstance(scrubbed, tuple)
 
-    def test_otel_sink_emit(self):
+    def test_otel_sink_emit(self) -> None:
         # Initialize Sink
         sink = OTelLogSink()
 
         # Inject Mock Logger directly (avoiding import patching issues)
         mock_otel_logger = MagicMock()
-        sink._logger = mock_otel_logger
+        sink._logger = mock_otel_logger  # type: ignore
 
         # Manually invoke call with a mock loguru message
         mock_message = MagicMock()
@@ -97,9 +97,9 @@ class TestLoggingUtils(unittest.TestCase):
         self.assertEqual(kwargs["attributes"]["custom_key"], "custom_value")
         self.assertEqual(kwargs["attributes"]["log.function"], "test_func")
 
-    def test_otel_sink_severity_mapping(self):
+    def test_otel_sink_severity_mapping(self) -> None:
         sink = OTelLogSink()
-        sink._logger = MagicMock()
+        sink._logger = MagicMock()  # type: ignore
 
         levels = [
             (5, 5),   # Trace
@@ -131,7 +131,7 @@ class TestLoggingUtils(unittest.TestCase):
             self.assertNotIn("trace_id", kwargs["attributes"])
             self.assertEqual(kwargs["attributes"]["complex"], "{'a': 1}")
 
-    def test_otel_sink_lazy_init(self):
+    def test_otel_sink_lazy_init(self) -> None:
         # Patch the function in opentelemetry._logs
         with patch("opentelemetry._logs.get_logger_provider") as mock_get_provider:
             mock_provider = MagicMock()
@@ -144,7 +144,7 @@ class TestLoggingUtils(unittest.TestCase):
             mock_get_provider.assert_called_once()
             mock_provider.get_logger.assert_called_with(sink.service_name)
 
-    def test_trace_context_patcher(self):
+    def test_trace_context_patcher(self) -> None:
         from coreason_veritas.logging_utils import _trace_context_patcher
         from unittest.mock import patch
 
@@ -156,9 +156,9 @@ class TestLoggingUtils(unittest.TestCase):
             mock_ctx.span_id = 0x456
             mock_get_span.return_value.get_span_context.return_value = mock_ctx
 
-            record = {"extra": {}}
-            _trace_context_patcher(record)
-            self.assertEqual(record["extra"]["trace_id"], f"{0x123:032x}")
+            record = {"extra": {}}  # type: ignore
+            _trace_context_patcher(record)  # type: ignore
+            self.assertEqual(record["extra"]["trace_id"], f"{0x123:032x}")  # type: ignore
 
         # Test with invalid span
         with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
@@ -166,26 +166,26 @@ class TestLoggingUtils(unittest.TestCase):
             mock_ctx.is_valid = False
             mock_get_span.return_value.get_span_context.return_value = mock_ctx
 
-            record = {"extra": {}}
-            _trace_context_patcher(record)
-            self.assertEqual(record["extra"]["trace_id"], "0" * 32)
+            record = {"extra": {}}  # type: ignore
+            _trace_context_patcher(record)  # type: ignore
+            self.assertEqual(record["extra"]["trace_id"], "0" * 32)  # type: ignore
 
         # Test with no span (None)
         with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
             mock_get_span.return_value = None
 
-            record = {"extra": {}}
-            _trace_context_patcher(record)
+            record = {"extra": {}}  # type: ignore
+            _trace_context_patcher(record)  # type: ignore
             # Should return without modifying if we assume extra is empty?
-            # Actually code returns if not span.
-            # But we didn't populate extra.
             pass
 
-    def test_configure_logging(self):
+    def test_configure_logging(self) -> None:
         # Patch the singleton logger methods directly
-        with patch.object(logger, "remove") as mock_remove, \
-             patch.object(logger, "add") as mock_add, \
-             patch.object(logger, "configure") as mock_configure:
+        with (
+            patch.object(logger, "remove") as mock_remove,
+            patch.object(logger, "add") as mock_add,
+            patch.object(logger, "configure") as mock_configure,
+        ):
 
             configure_logging()
 
@@ -198,12 +198,14 @@ class TestLoggingUtils(unittest.TestCase):
             # Verify logger.configure was called (for patcher)
             mock_configure.assert_called()
 
-    def test_configure_logging_json(self):
+    def test_configure_logging_json(self) -> None:
         # Patch environment and logger
-        with patch.dict("os.environ", {"LOG_FORMAT": "JSON"}), \
-             patch.object(logger, "remove") as mock_remove, \
-             patch.object(logger, "add") as mock_add, \
-             patch.object(logger, "configure") as mock_configure:
+        with (
+            patch.dict("os.environ", {"LOG_FORMAT": "JSON"}),
+            patch.object(logger, "remove"),
+            patch.object(logger, "add") as mock_add,
+            patch.object(logger, "configure"),
+        ):
 
             configure_logging()
 

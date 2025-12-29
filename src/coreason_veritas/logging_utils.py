@@ -56,18 +56,18 @@ class OTelLogSink:
     A Loguru sink that forwards log records to OpenTelemetry.
     """
 
-    def __init__(self, service_name: str = "coreason-veritas"):
+    def __init__(self, service_name: str = "coreason-veritas") -> None:
         self.service_name = service_name
-        self._logger = None
+        self._logger: Any = None
 
     @property
-    def otel_logger(self):
+    def otel_logger(self) -> Any:
         if self._logger is None:
             provider = _logs.get_logger_provider()
             self._logger = provider.get_logger(self.service_name)
         return self._logger
 
-    def __call__(self, message) -> None:
+    def __call__(self, message: Any) -> None:
         """
         Loguru sink callback.
         """
@@ -120,7 +120,7 @@ class OTelLogSink:
         )
 
 
-def _trace_context_patcher(record):
+def _trace_context_patcher(record: Dict[str, Any]) -> None:
     """
     Loguru patcher to inject trace_id and span_id into extra.
     """
@@ -137,7 +137,7 @@ def _trace_context_patcher(record):
         record["extra"]["span_id"] = "0" * 16
 
 
-def configure_logging():
+def configure_logging() -> None:
     """
     Configures Loguru with:
     1. Console sink (Text or JSON)

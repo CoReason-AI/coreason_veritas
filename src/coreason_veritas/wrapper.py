@@ -117,7 +117,7 @@ def governed_execution(
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def log_start(attributes: Dict[str, str], bound: inspect.BoundArguments):
+        def log_start(attributes: Dict[str, str], bound: inspect.BoundArguments) -> None:
             # Scrub arguments
             safe_args = scrub_sensitive_data(bound.arguments)
             logger.bind(**attributes).info(
@@ -126,7 +126,7 @@ def governed_execution(
                 function=func.__name__
             )
 
-        def log_end(attributes: Dict[str, str], start_time: float, success: bool = True):
+        def log_end(attributes: Dict[str, str], start_time: float, success: bool = True) -> None:
             duration_ms = (time.perf_counter() - start_time) * 1000
             verdict = "ALLOWED" if success else "BLOCKED"
             logger.bind(**attributes).info(
