@@ -20,15 +20,21 @@ from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
 from .wrapper import governed_execution
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
 __all__ = ["governed_execution", "SignatureValidator", "DeterminismInterceptor"]
 
-if not os.environ.get("COREASON_VERITAS_TEST_MODE"):
-    try:
-        _auditor = IERLogger()
-        _auditor.emit_handshake(__version__)
-    except Exception as e:
-        logging.getLogger("coreason.veritas").error(f"MACO Audit Link Failed: {e}")
+
+def initialize() -> None:
+    """
+    Explicitly initializes the Veritas Engine and emits the handshake audit log.
+    This should be called by the application entry point, not implicitly on import.
+    """
+    if not os.environ.get("COREASON_VERITAS_TEST_MODE"):
+        try:
+            _auditor = IERLogger()
+            _auditor.emit_handshake(__version__)
+        except Exception as e:
+            logging.getLogger("coreason.veritas").error(f"MACO Audit Link Failed: {e}")

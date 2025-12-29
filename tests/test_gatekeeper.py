@@ -104,10 +104,9 @@ def test_verify_asset_wrong_key(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 
 
 def test_verify_asset_malformed_key() -> None:
-    """Test initialization/verification with a malformed public key."""
-    validator = SignatureValidator("not-a-pem-key")
-    with pytest.raises(AssetTamperedError):
-        validator.verify_asset({"a": 1}, "deadbeef")
+    """Test initialization fails with a malformed public key."""
+    with pytest.raises(ValueError, match="Invalid public key provided"):
+        SignatureValidator("not-a-pem-key")
 
 
 def test_verify_asset_complex_nested_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:

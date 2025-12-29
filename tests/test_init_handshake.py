@@ -25,9 +25,7 @@ def _unload_coreason_veritas() -> None:
 
 def test_init_audit_handshake(caplog: Any) -> None:
     """
-    Test that importing coreason_veritas triggers the audit handshake.
-    We manually inject a mock module for coreason_veritas.auditor to guarantee
-    that the import uses our mock.
+    Test that calling initialize() triggers the audit handshake.
     """
     _unload_coreason_veritas()
 
@@ -39,25 +37,24 @@ def test_init_audit_handshake(caplog: Any) -> None:
         # Create a mock module for auditor
         mock_auditor_module = types.ModuleType("coreason_veritas.auditor")
         mock_ier_logger_class = MagicMock()
-        # Mypy complains about dynamic attribute assignment to ModuleType
         mock_auditor_module.IERLogger = mock_ier_logger_class  # type: ignore[attr-defined]
 
-        # Inject it into sys.modules
-        # We must also ensure coreason_veritas (parent) is not loaded,
-        # but we need to let it load during import.
         sys.modules["coreason_veritas.auditor"] = mock_auditor_module
 
         try:
-            # Import the package
-            import coreason_veritas  # noqa: F401
+            import coreason_veritas
+
+            # Should NOT be called on import anymore
+            mock_ier_logger_class.assert_not_called()
+
+            # Call initialize explicitly
+            coreason_veritas.initialize()
 
             # Verify IERLogger was instantiated
             mock_ier_logger_class.assert_called_once()
-            # Verify handshake was called
             mock_ier_logger_class.return_value.emit_handshake.assert_called_once_with(coreason_veritas.__version__)
 
         finally:
-            # Cleanup: remove our manual mock so other tests are not affected
             if "coreason_veritas.auditor" in sys.modules:
                 del sys.modules["coreason_veritas.auditor"]
             if "coreason_veritas" in sys.modules:
@@ -66,7 +63,7 @@ def test_init_audit_handshake(caplog: Any) -> None:
 
 def test_init_audit_handshake_failure(caplog: Any) -> None:
     """
-    Test that failures in handshake are logged but don't crash import.
+    Test that failures in handshake are logged but don't crash.
     """
     _unload_coreason_veritas()
 
@@ -78,7 +75,6 @@ def test_init_audit_handshake_failure(caplog: Any) -> None:
         # Create a mock module for auditor
         mock_auditor_module = types.ModuleType("coreason_veritas.auditor")
         mock_ier_logger_class = MagicMock()
-        # Simulate failure
         mock_ier_logger_class.side_effect = Exception("Simulated Failure")
         mock_auditor_module.IERLogger = mock_ier_logger_class  # type: ignore[attr-defined]
 
@@ -86,13 +82,14 @@ def test_init_audit_handshake_failure(caplog: Any) -> None:
 
         try:
             with caplog.at_level(logging.ERROR, logger="coreason.veritas"):
-                import coreason_veritas  # noqa: F401
+                import coreason_veritas
+
+                coreason_veritas.initialize()
 
                 # Verify error log
                 assert "MACO Audit Link Failed: Simulated Failure" in caplog.text
 
         finally:
-            # Cleanup
             if "coreason_veritas.auditor" in sys.modules:
                 del sys.modules["coreason_veritas.auditor"]
             if "coreason_veritas" in sys.modules:

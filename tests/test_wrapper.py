@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import governed_execution
+from coreason_veritas.wrapper import _prepare_governance, get_public_key_from_store, governed_execution
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -59,6 +59,7 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
 
     # Set Env Var for Key Store
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         payload = {"data": "secure"}
         signature = sign_payload(payload, private_key)
 
@@ -95,6 +96,7 @@ async def test_governed_execution_tampered(key_pair: Tuple[RSAPrivateKey, str]) 
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         payload = {"data": "secure"}
         signature = sign_payload(payload, private_key)
         tampered_payload = {"data": "hacked"}
@@ -114,8 +116,10 @@ async def test_governed_execution_missing_key_store(key_pair: Tuple[RSAPrivateKe
     payload = {"data": "secure"}
     signature = sign_payload(payload, private_key)
 
-    # Ensure env var is unset
-    with patch.dict(os.environ, {}, clear=True):
+    # Explicitly patch get_public_key_from_store to simulate missing env var, avoiding cache issues
+    with patch(
+        "coreason_veritas.wrapper.get_public_key_from_store", side_effect=ValueError("COREASON_VERITAS_PUBLIC_KEY")
+    ):
 
         @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
         async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
@@ -133,14 +137,31 @@ async def test_governed_execution_missing_args(key_pair: Tuple[RSAPrivateKey, st
     async def protected_function(spec: Any, sig: Any, user: Any) -> str:
         return "Should not reach here"
 
-    with pytest.raises(ValueError, match="Missing signature argument"):
+    # Now raises TypeError because bind() fails when required args are missing
+    with pytest.raises(TypeError):
         await protected_function(spec={"a": 1}, user="u")  # Missing sig
 
-    with pytest.raises(ValueError, match="Missing asset argument"):
+    with pytest.raises(TypeError):
         await protected_function(sig="abc", user="u")  # Missing spec
 
-    with pytest.raises(ValueError, match="Missing user ID argument"):
+    with pytest.raises(TypeError):
         await protected_function(spec={"a": 1}, sig="abc")  # Missing user
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_missing_args_defaults(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure when required args are missing but have defaults (None)."""
+
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+    async def protected_function(spec: Any = None, sig: Any = None, user: Any = None) -> str:
+        return "Should not reach here"
+
+    # bind() succeeds, so our manual checks run
+    with pytest.raises(ValueError, match="Missing asset argument"):
+        await protected_function(sig="s", user="u")
+
+    with pytest.raises(ValueError, match="Missing user ID argument"):
+        await protected_function(spec="a", sig="s")
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -151,6 +172,7 @@ async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         payload = {"data": "concurrent"}
         signature = sign_payload(payload, private_key)
 
@@ -186,6 +208,7 @@ async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateK
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         payload = {"data": "error"}
         signature = sign_payload(payload, private_key)
 
@@ -223,6 +246,7 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
     sig_inner = sign_payload(payload_inner, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         # Mock Tracer
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
@@ -271,14 +295,15 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
-    Test that calling the governed function with positional arguments fails
-    because the wrapper expects keyword arguments for verification.
+    Test that calling the governed function with positional arguments works
+    now that the wrapper inspects the signature.
     """
     private_key, public_key_pem = key_pair
     payload = {"data": "secure"}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
@@ -288,12 +313,13 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
             async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
                 return "OK"
 
-            # Passing arguments positionally
-            # wrapper looks for kwargs.get("spec") etc., which will be None
-            with pytest.raises(ValueError, match="Missing asset argument"):
-                # This simulates `protected_function(payload, signature, "u")`
-                # but since we are calling the wrapper, we pass them as positional args to the wrapper
-                await protected_function(payload, signature, "user-123")
+            # Passing arguments positionally should now succeed
+            result = await protected_function(payload, signature, "user-123")
+            assert result == "OK"
+
+            # Mixed positional and keyword
+            result_mixed = await protected_function(payload, sig=signature, user="user-mixed")
+            assert result_mixed == "OK"
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -309,6 +335,7 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
@@ -343,6 +370,7 @@ def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) ->
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
         payload = {"data": "sync"}
         signature = sign_payload(payload, private_key)
 
@@ -428,3 +456,110 @@ async def test_governed_execution_strict_mode_enforced(key_pair: Tuple[RSAPrivat
         # Execute without signature
         with pytest.raises(ValueError, match="Missing signature argument"):
             await strict_function(spec=payload, sig=None, user="strict-user")
+
+
+# --- Helper Function Tests (Integrated) ---
+
+
+def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test the helper function independently."""
+    private_key, public_key_pem = key_pair
+
+    # Mock func signature
+    def mock_func(a: int, b: int, asset: Dict[str, Any], sig: str, user: str) -> None:
+        pass
+
+    asset = {"id": 1}
+    # Use real key/signature to ensure verification logic passes in 'test mode'
+    sig_val = sign_payload(asset, private_key)
+    user_val = "user1"
+
+    # Args and kwargs
+    args = (1, 2)
+    kwargs = {"asset": asset, "sig": sig_val, "user": user_val}
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
+
+        attributes, bound = _prepare_governance(
+            func=mock_func,
+            args=args,
+            kwargs=kwargs,
+            asset_id_arg="asset",
+            signature_arg="sig",
+            user_id_arg="user",
+            config_arg=None,
+            allow_unsigned=False,
+        )
+
+        # Verify attributes
+        assert attributes["co.asset_id"] == str(asset)
+        assert attributes["co.user_id"] == user_val
+        assert attributes["co.srb_sig"] == sig_val
+
+        # Verify bound arguments
+        assert bound.arguments["a"] == 1
+        assert bound.arguments["asset"] == asset
+
+
+def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test helper with positional arguments."""
+    private_key, public_key_pem = key_pair
+
+    def mock_func(asset: Dict[str, Any], sig: str, user: str) -> None:
+        pass
+
+    asset = {"id": 1}
+    sig_val = sign_payload(asset, private_key)
+    user_val = "user1"
+
+    # All positional
+    args = (asset, sig_val, user_val)
+    kwargs: Dict[str, Any] = {}
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
+
+        attributes, bound = _prepare_governance(
+            func=mock_func,
+            args=args,
+            kwargs=kwargs,
+            asset_id_arg="asset",
+            signature_arg="sig",
+            user_id_arg="user",
+            config_arg=None,
+            allow_unsigned=False,
+        )
+
+        assert attributes["co.asset_id"] == str(asset)
+        assert bound.arguments["asset"] == asset
+
+
+def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test helper config sanitization."""
+    private_key, public_key_pem = key_pair
+
+    def mock_func(config: Dict[str, Any], asset: Any, sig: Any, user: Any) -> None:
+        pass
+
+    risky_config = {"temperature": 0.9, "seed": 999}
+    asset = {"id": 1}
+    sig_val = sign_payload(asset, private_key)
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        get_public_key_from_store.cache_clear()
+
+        attributes, bound = _prepare_governance(
+            func=mock_func,
+            args=(),
+            kwargs={"config": risky_config, "asset": asset, "sig": sig_val, "user": "u"},
+            asset_id_arg="asset",
+            signature_arg="sig",
+            user_id_arg="user",
+            config_arg="config",
+            allow_unsigned=False,
+        )
+
+        sanitized = bound.arguments["config"]
+        assert sanitized["temperature"] == 0.0
+        assert sanitized["seed"] == 42

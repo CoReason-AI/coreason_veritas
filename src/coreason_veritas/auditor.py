@@ -20,10 +20,18 @@ from opentelemetry import _logs, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk._logs.export import (
+    BatchLogRecordProcessor,
+    ConsoleLogRecordExporter,
+    SimpleLogRecordProcessor,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    ConsoleSpanExporter,
+    SimpleSpanProcessor,
+)
 
 from coreason_veritas.anchor import is_anchor_active
 
@@ -37,6 +45,7 @@ class IERLogger:
 
     _instance: Optional["IERLogger"] = None
     _initialized: bool = False
+    _service_name: str
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "IERLogger":
         if cls._instance is None:
@@ -52,7 +61,14 @@ class IERLogger:
                           Defaults to "coreason-veritas" if not provided.
         """
         if self._initialized:
+            if getattr(self, "_service_name", None) != service_name:
+                loguru_logger.warning(
+                    f"IERLogger already initialized with service_name='{self._service_name}'. "
+                    f"Ignoring new service_name='{service_name}'."
+                )
             return
+
+        self._service_name = service_name
 
         # 1. Resource Attributes: Generic metadata for client portability
         resource = Resource.create(
@@ -66,7 +82,13 @@ class IERLogger:
         # 2. Setup Tracing (for AI workflow logic)
         tp = TracerProvider(resource=resource)
         # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+
+        if os.environ.get("COREASON_VERITAS_TEST_MODE"):
+            # Use Console Exporter in Test Mode to avoid connection errors
+            # Use SimpleSpanProcessor to ensure synchronous export and avoid race conditions
+            tp.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        else:
+            tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 
         # Guard: Check if a tracer provider is already set to avoid warnings/errors
         # Note: trace.get_tracer_provider() returns a ProxyTracerProvider by default if not set.
@@ -78,7 +100,13 @@ class IERLogger:
         # 3. Setup Logging (for the Handshake and IER events)
         lp = LoggerProvider(resource=resource)
         _logs.set_logger_provider(lp)
-        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+
+        if os.environ.get("COREASON_VERITAS_TEST_MODE"):
+            # Use Console Exporter in Test Mode
+            # Use SimpleLogRecordProcessor to ensure synchronous export
+            lp.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogRecordExporter()))
+        else:
+            lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
         # Attach to standard Python logging
         # We use a specific logger for the OTel bridge
@@ -167,7 +195,8 @@ class IERLogger:
                 try:
                     sink(event_payload)
                 except Exception as e:
-                    # Suppress sink failures to protect the main application loop
+                    # Fail Closed: If an audit sink fails, the entire operation must fail.
                     loguru_logger.error(f"Audit Sink Failure: {e}")
+                    raise e
 
             yield span

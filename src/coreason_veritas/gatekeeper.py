@@ -32,6 +32,14 @@ class SignatureValidator:
             public_key_store: The SRB Public Key (PEM format string).
         """
         self.key_store = public_key_store
+        # Pre-load the public key to improve performance on repeated verification calls
+        try:
+            self._public_key = serialization.load_pem_public_key(self.key_store.encode())
+        except Exception as e:
+            # We log but allow initialization; verification will fail later if key is invalid,
+            # or we could raise here. Raising here is safer to fail fast.
+            logger.error(f"Failed to load public key: {e}")
+            raise ValueError(f"Invalid public key provided: {e}") from e
 
     def verify_asset(self, asset_payload: Dict[str, Any], signature: str) -> bool:
         """
@@ -48,8 +56,8 @@ class SignatureValidator:
             AssetTamperedError: If verification fails.
         """
         try:
-            # Load the public key
-            public_key = serialization.load_pem_public_key(self.key_store.encode())
+            # Use pre-loaded public key
+            public_key = self._public_key
 
             # Canonicalize the asset_payload (JSON) to ensure consistent hashing
             canonical_payload = json.dumps(asset_payload, sort_keys=True).encode()
@@ -65,6 +73,6 @@ class SignatureValidator:
             logger.info("Asset verification successful.")
             return True
 
-        except (ValueError, TypeError, InvalidSignature, Exception) as e:
+        except (ValueError, TypeError, InvalidSignature, json.JSONDecodeError) as e:
             logger.error(f"Asset verification failed: {e}")
             raise AssetTamperedError(f"Signature verification failed: {e}") from e

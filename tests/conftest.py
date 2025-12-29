@@ -14,21 +14,24 @@ from unittest.mock import patch
 import pytest
 
 from coreason_veritas.auditor import IERLogger
+from coreason_veritas.wrapper import get_public_key_from_store
 
 
 @pytest.fixture(autouse=True)  # type: ignore[misc]
-def mock_global_exporters() -> Generator[None, None, None]:
+def clear_key_cache() -> Generator[None, None, None]:
+    """Clear the LRU cache for key store before/after each test."""
+    get_public_key_from_store.cache_clear()
+    yield
+    get_public_key_from_store.cache_clear()
+
+
+@pytest.fixture(autouse=True)  # type: ignore[misc]
+def set_test_mode() -> Generator[None, None, None]:
     """
-    Globally mock OTLP exporters and processors to prevent real network connections
-    during tests. This ensures that IERLogger instantiation in any test does not
-    trigger background connection attempts to localhost:4318.
+    Set COREASON_VERITAS_TEST_MODE to force IERLogger to use Console Exporters
+    instead of connecting to a real OTLP collector.
     """
-    with (
-        patch("coreason_veritas.auditor.OTLPSpanExporter"),
-        patch("coreason_veritas.auditor.OTLPLogExporter"),
-        patch("coreason_veritas.auditor.BatchSpanProcessor"),
-        patch("coreason_veritas.auditor.BatchLogRecordProcessor"),
-    ):
+    with patch.dict("os.environ", {"COREASON_VERITAS_TEST_MODE": "true"}):
         yield
 
 
