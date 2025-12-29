@@ -20,10 +20,18 @@ from opentelemetry import _logs, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
+from opentelemetry.sdk._logs.export import (
+    BatchLogRecordProcessor,
+    ConsoleLogRecordExporter,
+    SimpleLogRecordProcessor,
+)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    ConsoleSpanExporter,
+    SimpleSpanProcessor,
+)
 
 from coreason_veritas.anchor import is_anchor_active
 
@@ -77,7 +85,8 @@ class IERLogger:
 
         if os.environ.get("COREASON_VERITAS_TEST_MODE"):
             # Use Console Exporter in Test Mode to avoid connection errors
-            tp.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+            # Use SimpleSpanProcessor to ensure synchronous export and avoid race conditions
+            tp.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
         else:
             tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 
@@ -94,7 +103,8 @@ class IERLogger:
 
         if os.environ.get("COREASON_VERITAS_TEST_MODE"):
             # Use Console Exporter in Test Mode
-            lp.add_log_record_processor(BatchLogRecordProcessor(ConsoleLogExporter()))
+            # Use SimpleLogRecordProcessor to ensure synchronous export
+            lp.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogRecordExporter()))
         else:
             lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
