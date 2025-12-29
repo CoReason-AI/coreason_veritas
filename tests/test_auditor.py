@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import logging
-from typing import Generator
+from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -52,7 +52,7 @@ def mock_exporters() -> Generator[None, None, None]:
         patch("coreason_veritas.auditor.OTLPLogExporter"),
         patch("coreason_veritas.auditor.BatchSpanProcessor"),
         patch("coreason_veritas.auditor.BatchLogRecordProcessor"),
-        patch("coreason_veritas.auditor.LoggingHandler"),
+        patch("coreason_veritas.auditor.LoggingHandler", spec=logging.Handler),
     ):
         yield
 
@@ -285,3 +285,82 @@ def test_logging_handler_attached(mock_exporters: None, mock_logger_provider: Ma
         # Verify handler is attached to the internal logger
         assert len(logger_instance.otel_bridge_logger.handlers) > 0
         assert isinstance(logger_instance.otel_bridge_logger.handlers[0], logging.Handler)
+
+
+def test_register_sink_and_execution(mock_exporters: None, mock_tracer: MagicMock) -> None:
+    """
+    Test that registered sinks are called with the correct payload
+    when start_governed_span is invoked.
+    """
+    logger = IERLogger("test-service")
+
+    # Define a mock sink
+    mock_sink = MagicMock()
+    logger.register_sink(mock_sink)
+
+    attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s"}
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    with logger.start_governed_span("test-sink-execution", attributes):
+        pass
+
+    # Verify sink was called
+    mock_sink.assert_called_once()
+    payload = mock_sink.call_args[0][0]
+
+    assert payload["span_name"] == "test-sink-execution"
+    # Auditor adds 'co.determinism_verified', so we check subset or specific keys
+    assert payload["attributes"]["co.user_id"] == attributes["co.user_id"]
+    assert payload["attributes"]["co.asset_id"] == attributes["co.asset_id"]
+    assert payload["attributes"]["co.srb_sig"] == attributes["co.srb_sig"]
+    assert "co.determinism_verified" in payload["attributes"]
+
+    assert "timestamp" in payload
+    # Basic format check for ISO timestamp
+    assert "T" in payload["timestamp"]
+
+
+def test_sink_exception_suppression(mock_exporters: None, mock_tracer: MagicMock) -> None:
+    """
+    Test that exceptions in sinks are caught and do not crash the application.
+    """
+    logger = IERLogger("test-service")
+
+    # Define a sink that raises an exception
+    def failing_sink(payload: Dict[str, Any]) -> None:
+        raise RuntimeError("Sink exploded")
+
+    logger.register_sink(failing_sink)
+
+    attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s"}
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    # Should not raise exception
+    with logger.start_governed_span("test-sink-failure", attributes):
+        pass
+
+    # Loguru should have logged the error (we could mock loguru but ensuring no crash is main goal)
+
+
+def test_start_governed_span_draft_mode(mock_exporters: None, mock_tracer: MagicMock) -> None:
+    """
+    Test that start_governed_span allows missing signature if co.compliance_mode is DRAFT.
+    """
+    logger = IERLogger("test-service")
+
+    attributes = {
+        "co.user_id": "u",
+        "co.asset_id": "a",
+        "co.compliance_mode": "DRAFT",
+    }  # Missing co.srb_sig
+
+    mock_span = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+
+    # Should not raise ValueError
+    with logger.start_governed_span("test-draft-mode", attributes):
+        pass
+
+    mock_tracer.start_as_current_span.assert_called_once()

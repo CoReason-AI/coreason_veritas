@@ -30,7 +30,11 @@ def get_public_key_from_store() -> str:
 
 
 def governed_execution(
-    asset_id_arg: str, signature_arg: str, user_id_arg: str, config_arg: Optional[str] = None
+    asset_id_arg: str,
+    signature_arg: str,
+    user_id_arg: str,
+    config_arg: Optional[str] = None,
+    allow_unsigned: bool = False,
 ) -> Callable[..., Any]:
     """
     Decorator that bundles Gatekeeper, Auditor, and Anchor into a single atomic wrapper.
@@ -40,6 +44,7 @@ def governed_execution(
         signature_arg: The name of the keyword argument containing the signature.
         user_id_arg: The name of the keyword argument containing the user ID.
         config_arg: Optional name of the keyword argument containing the configuration dict to be sanitized.
+        allow_unsigned: If True, allows execution without a valid signature (Draft Mode).
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -49,24 +54,34 @@ def governed_execution(
             asset = kwargs.get(asset_id_arg)
             user_id = kwargs.get(user_id_arg)
 
-            if sig is None:
-                raise ValueError(f"Missing signature argument: {signature_arg}")
             if asset is None:
                 raise ValueError(f"Missing asset argument: {asset_id_arg}")
             if user_id is None:
                 raise ValueError(f"Missing user ID argument: {user_id_arg}")
 
-            # Retrieve key from store (Env Var)
-            public_key = get_public_key_from_store()
-            SignatureValidator(public_key).verify_asset(asset, sig)
-
-            # Prepare attributes for Auditor
-            return {
+            attributes = {
                 "asset": str(asset),  # Legacy support from spec example
                 "co.asset_id": str(asset),
                 "co.user_id": str(user_id),
-                "co.srb_sig": str(sig),
             }
+
+            # Draft Mode Logic
+            if allow_unsigned and sig is None:
+                # Bypass signature check and inject Draft Mode tag
+                attributes["co.compliance_mode"] = "DRAFT"
+            else:
+                # Strict Mode (Default)
+                if sig is None:
+                    raise ValueError(f"Missing signature argument: {signature_arg}")
+
+                # Retrieve key from store (Env Var)
+                public_key = get_public_key_from_store()
+                SignatureValidator(public_key).verify_asset(asset, sig)
+
+                attributes["co.srb_sig"] = str(sig)
+
+            # Prepare attributes for Auditor
+            return attributes
 
         def _sanitize_kwargs(kwargs: Dict[str, Any]) -> None:
             """
