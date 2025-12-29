@@ -275,7 +275,7 @@ from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
 from .anchor import DeterminismInterceptor
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 try:
     _auditor = IERLogger()
