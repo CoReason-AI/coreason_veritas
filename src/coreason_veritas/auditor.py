@@ -37,6 +37,7 @@ class IERLogger:
 
     _instance: Optional["IERLogger"] = None
     _initialized: bool = False
+    _service_name: str
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "IERLogger":
         if cls._instance is None:

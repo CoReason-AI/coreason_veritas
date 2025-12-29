@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import governed_execution, get_public_key_from_store
+from coreason_veritas.wrapper import get_public_key_from_store, governed_execution
 
 # --- Fixtures & Helpers ---
 

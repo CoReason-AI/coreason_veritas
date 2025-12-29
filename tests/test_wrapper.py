@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import governed_execution, _prepare_governance, get_public_key_from_store
+from coreason_veritas.wrapper import _prepare_governance, get_public_key_from_store, governed_execution
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -117,7 +117,9 @@ async def test_governed_execution_missing_key_store(key_pair: Tuple[RSAPrivateKe
     signature = sign_payload(payload, private_key)
 
     # Explicitly patch get_public_key_from_store to simulate missing env var, avoiding cache issues
-    with patch("coreason_veritas.wrapper.get_public_key_from_store", side_effect=ValueError("COREASON_VERITAS_PUBLIC_KEY")):
+    with patch(
+        "coreason_veritas.wrapper.get_public_key_from_store", side_effect=ValueError("COREASON_VERITAS_PUBLIC_KEY")
+    ):
 
         @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
         async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
@@ -321,7 +323,7 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
-@pytest.mark.xfail(reason="Recursion depth or cache interaction causing AssetTamperedError in test harness")
+@pytest.mark.xfail(reason="Recursion depth or cache interaction causing AssetTamperedError in test harness")  # type: ignore[misc]
 async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test recursive calls to a governed function.
@@ -459,6 +461,7 @@ async def test_governed_execution_strict_mode_enforced(key_pair: Tuple[RSAPrivat
 
 # --- Helper Function Tests (Integrated) ---
 
+
 def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test the helper function independently."""
     private_key, public_key_pem = key_pair
@@ -487,7 +490,7 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             signature_arg="sig",
             user_id_arg="user",
             config_arg=None,
-            allow_unsigned=False
+            allow_unsigned=False,
         )
 
         # Verify attributes
@@ -526,7 +529,7 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
             signature_arg="sig",
             user_id_arg="user",
             config_arg=None,
-            allow_unsigned=False
+            allow_unsigned=False,
         )
 
         assert attributes["co.asset_id"] == str(asset)
@@ -555,7 +558,7 @@ def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) ->
             signature_arg="sig",
             user_id_arg="user",
             config_arg="config",
-            allow_unsigned=False
+            allow_unsigned=False,
         )
 
         sanitized = bound.arguments["config"]

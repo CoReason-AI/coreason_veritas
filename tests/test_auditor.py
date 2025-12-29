@@ -373,12 +373,14 @@ def test_ier_logger_reinitialization_warning(caplog: Any) -> None:
 
             # Let's use a simpler approach: mock loguru logger
             with patch("coreason_veritas.auditor.loguru_logger") as mock_logger:
-                 IERLogger(service_name="service-2")
-                 mock_logger.warning.assert_called_once()
-                 assert "Ignoring new service_name='service-2'" in mock_logger.warning.call_args[0][0]
+                IERLogger(service_name="service-2")
+                mock_logger.warning.assert_called_once()
+                assert "Ignoring new service_name='service-2'" in mock_logger.warning.call_args[0][0]
 
 
-def test_ier_logger_reinitialization_warning_real(mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock) -> None:
+def test_ier_logger_reinitialization_warning_real(
+    mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock
+) -> None:
     """Duplicate test to force coverage of warning line without mocking loguru."""
     IERLogger._instance = None
     IERLogger._initialized = False
@@ -387,12 +389,14 @@ def test_ier_logger_reinitialization_warning_real(mock_tracer_provider: MagicMoc
         patch("coreason_veritas.auditor.trace.set_tracer_provider"),
         patch("coreason_veritas.auditor._logs.set_logger_provider"),
     ):
-        logger1 = IERLogger("s1")
+        IERLogger("s1")
         # Ensure we trigger the warning line with real execution
         IERLogger("s2")
 
 
-def test_ier_logger_production_mode_instantiation(mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock) -> None:
+def test_ier_logger_production_mode_instantiation(
+    mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock
+) -> None:
     """
     Test that in production mode (TEST_MODE unset), real OTLP exporters are instantiated.
     """
@@ -409,7 +413,7 @@ def test_ier_logger_production_mode_instantiation(mock_tracer_provider: MagicMoc
             IERLogger._instance = None
             IERLogger._initialized = False
 
-            logger = IERLogger()
+            IERLogger()
 
             # Verify real exporters were instantiated
             mock_span_exporter.assert_called_once()

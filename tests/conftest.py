@@ -35,8 +35,6 @@ def set_test_mode() -> Generator[None, None, None]:
         yield
 
 
-
-
 @pytest.fixture(autouse=True)  # type: ignore[misc]
 def reset_singleton() -> Generator[None, None, None]:
     """
