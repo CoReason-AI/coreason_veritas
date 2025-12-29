@@ -337,9 +337,10 @@ def test_sink_exception_suppression(mock_exporters: None, mock_tracer: MagicMock
     mock_span = MagicMock()
     mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
-    # Should not raise exception
-    with logger.start_governed_span("test-sink-failure", attributes):
-        pass
+    # Should raise exception (Fail Closed)
+    with pytest.raises(RuntimeError, match="Sink exploded"):
+        with logger.start_governed_span("test-sink-failure", attributes):
+            pass
 
     # Loguru should have logged the error (we could mock loguru but ensuring no crash is main goal)
 
