@@ -195,7 +195,8 @@ class IERLogger:
                 try:
                     sink(event_payload)
                 except Exception as e:
-                    # Suppress sink failures to protect the main application loop
+                    # Fail Closed: If an audit sink fails, the entire operation must fail.
                     loguru_logger.error(f"Audit Sink Failure: {e}")
+                    raise e
 
             yield span
