@@ -20,7 +20,7 @@ from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
 from .wrapper import governed_execution
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
