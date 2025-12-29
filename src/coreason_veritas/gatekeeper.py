@@ -73,6 +73,6 @@ class SignatureValidator:
             logger.info("Asset verification successful.")
             return True
 
-        except (ValueError, TypeError, InvalidSignature, Exception) as e:
+        except (ValueError, TypeError, InvalidSignature, json.JSONDecodeError) as e:
             logger.error(f"Asset verification failed: {e}")
             raise AssetTamperedError(f"Signature verification failed: {e}") from e

@@ -10,14 +10,15 @@
 
 import inspect
 import os
-from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from functools import lru_cache, wraps
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import SignatureValidator
 
 
+@lru_cache(maxsize=1)
 def get_public_key_from_store() -> str:
     """
     Retrieves the SRB Public Key from the immutable Key Store.
@@ -27,6 +28,70 @@ def get_public_key_from_store() -> str:
     if not key:
         raise ValueError("COREASON_VERITAS_PUBLIC_KEY environment variable is not set.")
     return key
+
+
+def _prepare_governance(
+    func: Callable[..., Any],
+    args: Any,
+    kwargs: Any,
+    asset_id_arg: str,
+    signature_arg: str,
+    user_id_arg: str,
+    config_arg: Optional[str],
+    allow_unsigned: bool,
+) -> Tuple[Dict[str, str], inspect.BoundArguments]:
+    """
+    Helper function to inspect arguments, perform Gatekeeper checks, and sanitize configuration.
+    It returns the audit attributes and the bound arguments (which may be modified).
+    """
+    sig = inspect.signature(func)
+    try:
+        bound = sig.bind(*args, **kwargs)
+    except TypeError as e:
+        raise TypeError(f"Arguments mapping failed: {e}") from e
+
+    bound.apply_defaults()
+    arguments = bound.arguments
+
+    # 1. Gatekeeper Check
+    asset = arguments.get(asset_id_arg)
+    user_id = arguments.get(user_id_arg)
+    signature = arguments.get(signature_arg)
+
+    if asset is None:
+        raise ValueError(f"Missing asset argument: {asset_id_arg}")
+    if user_id is None:
+        raise ValueError(f"Missing user ID argument: {user_id_arg}")
+
+    attributes = {
+        "asset": str(asset),  # Legacy support from spec example
+        "co.asset_id": str(asset),
+        "co.user_id": str(user_id),
+    }
+
+    # Draft Mode Logic
+    if allow_unsigned and signature is None:
+        # Bypass signature check and inject Draft Mode tag
+        attributes["co.compliance_mode"] = "DRAFT"
+    else:
+        # Strict Mode (Default)
+        if signature is None:
+            raise ValueError(f"Missing signature argument: {signature_arg}")
+
+        # Retrieve key from store (Env Var)
+        public_key = get_public_key_from_store()
+        SignatureValidator(public_key).verify_asset(asset, signature)
+
+        attributes["co.srb_sig"] = str(signature)
+
+    # 2. Config Sanitization
+    if config_arg and config_arg in arguments:
+        original_config = arguments[config_arg]
+        if isinstance(original_config, dict):
+            sanitized_config = DeterminismInterceptor.enforce_config(original_config)
+            arguments[config_arg] = sanitized_config
+
+    return attributes, bound
 
 
 def governed_execution(
@@ -48,60 +113,23 @@ def governed_execution(
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def _perform_gatekeeping(kwargs: Dict[str, Any]) -> Dict[str, str]:
-            # 1. Gatekeeper Check
-            sig = kwargs.get(signature_arg)
-            asset = kwargs.get(asset_id_arg)
-            user_id = kwargs.get(user_id_arg)
-
-            if asset is None:
-                raise ValueError(f"Missing asset argument: {asset_id_arg}")
-            if user_id is None:
-                raise ValueError(f"Missing user ID argument: {user_id_arg}")
-
-            attributes = {
-                "asset": str(asset),  # Legacy support from spec example
-                "co.asset_id": str(asset),
-                "co.user_id": str(user_id),
-            }
-
-            # Draft Mode Logic
-            if allow_unsigned and sig is None:
-                # Bypass signature check and inject Draft Mode tag
-                attributes["co.compliance_mode"] = "DRAFT"
-            else:
-                # Strict Mode (Default)
-                if sig is None:
-                    raise ValueError(f"Missing signature argument: {signature_arg}")
-
-                # Retrieve key from store (Env Var)
-                public_key = get_public_key_from_store()
-                SignatureValidator(public_key).verify_asset(asset, sig)
-
-                attributes["co.srb_sig"] = str(sig)
-
-            # Prepare attributes for Auditor
-            return attributes
-
-        def _sanitize_kwargs(kwargs: Dict[str, Any]) -> None:
-            """
-            If config_arg is specified, find it in kwargs, sanitize it, and update kwargs.
-            """
-            if config_arg and config_arg in kwargs:
-                original_config = kwargs[config_arg]
-                if isinstance(original_config, dict):
-                    sanitized_config = DeterminismInterceptor.enforce_config(original_config)
-                    kwargs[config_arg] = sanitized_config
-
         if inspect.isasyncgenfunction(func):
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                attributes, bound = _prepare_governance(
+                    func,
+                    args,
+                    kwargs,
+                    asset_id_arg,
+                    signature_arg,
+                    user_id_arg,
+                    config_arg,
+                    allow_unsigned,
+                )
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     with DeterminismInterceptor.scope():
-                        async for item in func(*args, **kwargs):
+                        async for item in func(*bound.args, **bound.kwargs):
                             yield item
 
             return wrapper
@@ -110,11 +138,19 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                attributes, bound = _prepare_governance(
+                    func,
+                    args,
+                    kwargs,
+                    asset_id_arg,
+                    signature_arg,
+                    user_id_arg,
+                    config_arg,
+                    allow_unsigned,
+                )
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     with DeterminismInterceptor.scope():
-                        yield from func(*args, **kwargs)
+                        yield from func(*bound.args, **bound.kwargs)
 
             return wrapper
 
@@ -122,14 +158,22 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                attributes, bound = _prepare_governance(
+                    func,
+                    args,
+                    kwargs,
+                    asset_id_arg,
+                    signature_arg,
+                    user_id_arg,
+                    config_arg,
+                    allow_unsigned,
+                )
 
                 # 2. Start Audit Span
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor.scope():
-                        return await func(*args, **kwargs)
+                        return await func(*bound.args, **bound.kwargs)
 
             return wrapper
 
@@ -137,14 +181,22 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                attributes, bound = _prepare_governance(
+                    func,
+                    args,
+                    kwargs,
+                    asset_id_arg,
+                    signature_arg,
+                    user_id_arg,
+                    config_arg,
+                    allow_unsigned,
+                )
 
                 # 2. Start Audit Span
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor.scope():
-                        return func(*args, **kwargs)
+                        return func(*bound.args, **bound.kwargs)
 
             return wrapper
 
