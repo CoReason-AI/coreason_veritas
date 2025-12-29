@@ -415,6 +415,7 @@ async def test_governed_execution_strict_mode_enforced(key_pair: Tuple[RSAPrivat
     payload = {"data": "strict"}
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+
         @governed_execution(
             asset_id_arg="spec",
             signature_arg="sig",
