@@ -83,7 +83,9 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
     assert sent_json["model"] == "gpt-4"
 
     # Assert Headers
-    assert sent_headers["Authorization"] == "Bearer test-key"
+    # Headers may be lowercased by TestClient
+    sent_headers_lower = {k.lower(): v for k, v in sent_headers.items()}
+    assert sent_headers_lower["authorization"] == "Bearer test-key"
 
 
 def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx_client: AsyncMock) -> None:
@@ -181,3 +183,45 @@ async def test_lifespan_initialization() -> None:
 
         # Shutdown: Client closed
         mock_instance.aclose.assert_called_once()
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_inference_retry_without_seed(client: TestClient, mock_httpx_client: AsyncMock) -> None:
+    """
+    Test that if the provider rejects the seed parameter (400), we retry without it.
+    """
+    # Setup mock response from upstream
+    # First call: 400 Bad Request
+    bad_response = MagicMock()
+    bad_response.status_code = 400
+    bad_response.text = "Unknown parameter: seed"
+    bad_response.json.return_value = {"error": "bad request"}
+
+    # Second call: 200 OK
+    good_response = MagicMock()
+    good_response.json.return_value = {
+        "id": "chatcmpl-retry",
+        "choices": [{"message": {"content": "Retry success"}}],
+    }
+    good_response.status_code = 200
+
+    mock_httpx_client.post.side_effect = [bad_response, good_response]
+
+    # User payload
+    payload = {"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}], "seed": 123}
+
+    response = client.post("/v1/chat/completions", json=payload, headers={"Authorization": "Bearer key"})
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "Retry success"
+
+    # Verify called twice
+    assert mock_httpx_client.post.call_count == 2
+
+    # First call has seed=42 (enforced)
+    first_call_json = mock_httpx_client.post.call_args_list[0].kwargs["json"]
+    assert first_call_json["seed"] == 42
+
+    # Second call has NO seed
+    second_call_json = mock_httpx_client.post.call_args_list[1].kwargs["json"]
+    assert "seed" not in second_call_json

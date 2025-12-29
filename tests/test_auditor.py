@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import logging
+import os
 from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
@@ -364,3 +365,49 @@ def test_start_governed_span_draft_mode(mock_exporters: None, mock_tracer: Magic
         pass
 
     mock_tracer.start_as_current_span.assert_called_once()
+
+
+def test_auditor_init_coverage() -> None:
+    # Test initialization with and without OTEL_EXPORTER_OTLP_ENDPOINT
+
+    # Case 1: With Endpoint (Should use OTLPSpanExporter)
+    with patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318"}):
+        IERLogger._instance = None
+        IERLogger._initialized = False
+
+        # We need to patch the processors to avoid actual connection attempts during init
+        with patch("coreason_veritas.auditor.BatchSpanProcessor"):
+            with patch("coreason_veritas.auditor.OTLPSpanExporter") as MockOTLPSpan:
+                IERLogger()
+                # Verify OTLP exporter was used
+                MockOTLPSpan.assert_called()
+
+    # Case 2: Without Endpoint but DEBUG=true (Should use ConsoleSpanExporter)
+    with patch.dict(os.environ, {"DEBUG": "true"}):
+        if "OTEL_EXPORTER_OTLP_ENDPOINT" in os.environ:
+            del os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
+
+        IERLogger._instance = None
+        IERLogger._initialized = False
+
+        with patch("coreason_veritas.auditor.BatchSpanProcessor"):
+            with patch("coreason_veritas.auditor.ConsoleSpanExporter") as MockConsoleSpan:
+                IERLogger()
+                # Verify Console exporter was used
+                MockConsoleSpan.assert_called()
+
+    # Case 3: Without Endpoint and DEBUG=false (Should use NoOp / pass)
+    with patch.dict(os.environ, {"DEBUG": "false"}):
+        if "OTEL_EXPORTER_OTLP_ENDPOINT" in os.environ:
+            del os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"]
+
+        IERLogger._instance = None
+        IERLogger._initialized = False
+
+        with patch("coreason_veritas.auditor.BatchSpanProcessor"):
+            with patch("coreason_veritas.auditor.ConsoleSpanExporter") as MockConsoleSpan:
+                with patch("coreason_veritas.auditor.OTLPSpanExporter") as MockOTLPSpan:
+                    IERLogger()
+                    # Verify NO exporter was used
+                    MockConsoleSpan.assert_not_called()
+                    MockOTLPSpan.assert_not_called()

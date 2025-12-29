@@ -33,7 +33,7 @@ def mock_keys() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),

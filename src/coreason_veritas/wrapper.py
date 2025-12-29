@@ -48,11 +48,21 @@ def governed_execution(
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def _perform_gatekeeping(kwargs: Dict[str, Any]) -> Dict[str, str]:
+        signature = inspect.signature(func)
+
+        def _extract_arguments(args: Any, kwargs: Dict[str, Any]) -> inspect.BoundArguments:
+            """
+            Binds args and kwargs to the function signature.
+            """
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+            return bound_args
+
+        def _perform_gatekeeping(all_args: Dict[str, Any]) -> Dict[str, str]:
             # 1. Gatekeeper Check
-            sig = kwargs.get(signature_arg)
-            asset = kwargs.get(asset_id_arg)
-            user_id = kwargs.get(user_id_arg)
+            sig = all_args.get(signature_arg)
+            asset = all_args.get(asset_id_arg)
+            user_id = all_args.get(user_id_arg)
 
             if asset is None:
                 raise ValueError(f"Missing asset argument: {asset_id_arg}")
@@ -83,25 +93,34 @@ def governed_execution(
             # Prepare attributes for Auditor
             return attributes
 
-        def _sanitize_kwargs(kwargs: Dict[str, Any]) -> None:
+        def _sanitize_kwargs(all_args: Dict[str, Any]) -> None:
             """
-            If config_arg is specified, find it in kwargs, sanitize it, and update kwargs.
+            If config_arg is specified, find it in all_args, sanitize it, and update it.
+            Note: Since we are working with a copy of arguments or modifying kwargs in place,
+            we need to ensure the changes propagate to the actual function call.
+            However, for 'wrapper', we pass *args and **kwargs.
+            Ideally, we should modify the mutable objects in place or reconstruct args/kwargs.
             """
-            if config_arg and config_arg in kwargs:
-                original_config = kwargs[config_arg]
+            if config_arg and config_arg in all_args:
+                original_config = all_args[config_arg]
                 if isinstance(original_config, dict):
                     sanitized_config = DeterminismInterceptor.enforce_config(original_config)
-                    kwargs[config_arg] = sanitized_config
+                    # We modify the object in place if possible, but enforce_config returns a new dict.
+                    # So we need to update the all_args dictionary.
+                    all_args[config_arg] = sanitized_config
 
         if inspect.isasyncgenfunction(func):
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                bound_args = _extract_arguments(args, kwargs)
+                all_args = bound_args.arguments
+                attributes = _perform_gatekeeping(all_args)
+                _sanitize_kwargs(all_args)
+
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     with DeterminismInterceptor.scope():
-                        async for item in func(*args, **kwargs):
+                        async for item in func(*bound_args.args, **bound_args.kwargs):
                             yield item
 
             return wrapper
@@ -110,11 +129,13 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                bound_args = _extract_arguments(args, kwargs)
+                all_args = bound_args.arguments
+                attributes = _perform_gatekeeping(all_args)
+                _sanitize_kwargs(all_args)
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     with DeterminismInterceptor.scope():
-                        yield from func(*args, **kwargs)
+                        yield from func(*bound_args.args, **bound_args.kwargs)
 
             return wrapper
 
@@ -122,14 +143,16 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                bound_args = _extract_arguments(args, kwargs)
+                all_args = bound_args.arguments
+                attributes = _perform_gatekeeping(all_args)
+                _sanitize_kwargs(all_args)
 
                 # 2. Start Audit Span
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor.scope():
-                        return await func(*args, **kwargs)
+                        return await func(*bound_args.args, **bound_args.kwargs)
 
             return wrapper
 
@@ -137,14 +160,16 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                attributes = _perform_gatekeeping(kwargs)
-                _sanitize_kwargs(kwargs)
+                bound_args = _extract_arguments(args, kwargs)
+                all_args = bound_args.arguments
+                attributes = _perform_gatekeeping(all_args)
+                _sanitize_kwargs(all_args)
 
                 # 2. Start Audit Span
                 with IERLogger().start_governed_span(func.__name__, attributes):
                     # 3. Anchor Context (Context Manager)
                     with DeterminismInterceptor.scope():
-                        return func(*args, **kwargs)
+                        return func(*bound_args.args, **bound_args.kwargs)
 
             return wrapper
 

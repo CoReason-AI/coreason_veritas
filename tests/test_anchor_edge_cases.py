@@ -14,11 +14,11 @@ from typing import List, cast
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 
 
-def test_enforce_config_shallow_copy_behavior() -> None:
+def test_enforce_config_deep_copy_behavior() -> None:
     """
-    Test that enforce_config performs a shallow copy.
-    This documents expected behavior: top-level keys are independent,
-    but nested mutable objects are shared.
+    Test that enforce_config performs a deep copy.
+    This ensures that modifications to the sanitized config do not leak back
+    to the original configuration, preserving integrity.
     """
     nested_list = [1, 2, 3]
     original_config = {"temperature": 0.9, "nested": nested_list, "metadata": {"key": "value"}}
@@ -29,19 +29,18 @@ def test_enforce_config_shallow_copy_behavior() -> None:
     assert sanitized["temperature"] == 0.0
     assert original_config["temperature"] == 0.9
 
-    # 2. Verify Nested Shared Reference (Shallow Copy)
-    # If we modify the nested list in sanitized, it SHOULD reflect in original
-    # because .copy() is shallow.
+    # 2. Verify Nested Independence (Deep Copy)
+    # If we modify the nested list in sanitized, it SHOULD NOT reflect in original
     sanitized["nested"].append(4)
     nested = cast(List[int], original_config["nested"])
-    assert len(nested) == 4
-    assert nested[-1] == 4
+    assert len(nested) == 3
+    assert 4 not in nested
 
 
 def test_enforce_config_custom_mapping() -> None:
     """
     Test enforce_config with a UserDict (custom mapping).
-    Ensures .copy() works on dict-like objects.
+    Ensures copy.deepcopy() works on dict-like objects.
     """
 
     class MyConfig(UserDict[str, float]):
@@ -53,7 +52,7 @@ def test_enforce_config_custom_mapping() -> None:
     assert sanitized["temperature"] == 0.0
     assert sanitized["top_p"] == 1.0
     assert sanitized["seed"] == 42
-    # The result of .copy() on UserDict is usually the same type
+    # deepcopy of UserDict preserves type
     assert isinstance(sanitized, MyConfig)
 
 

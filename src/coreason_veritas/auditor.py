@@ -20,10 +20,10 @@ from opentelemetry import _logs, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
 from coreason_veritas.anchor import is_anchor_active
 
@@ -65,8 +65,17 @@ class IERLogger:
 
         # 2. Setup Tracing (for AI workflow logic)
         tp = TracerProvider(resource=resource)
-        # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+
+        # Check if OTEL_EXPORTER_OTLP_ENDPOINT is set.
+        # If not, fall back to a safe default (Console or NoOp) to prevent connection errors.
+        if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+            tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        elif os.environ.get("DEBUG", "false").lower() == "true":
+            # Use ConsoleSpanExporter for local dev/debug if DEBUG is true
+            tp.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        else:
+            # Otherwise, do nothing (effectively NoOp) to keep console clean
+            pass
 
         # Guard: Check if a tracer provider is already set to avoid warnings/errors
         # Note: trace.get_tracer_provider() returns a ProxyTracerProvider by default if not set.
@@ -78,7 +87,14 @@ class IERLogger:
         # 3. Setup Logging (for the Handshake and IER events)
         lp = LoggerProvider(resource=resource)
         _logs.set_logger_provider(lp)
-        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+
+        if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+            lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+        elif os.environ.get("DEBUG", "false").lower() == "true":
+            lp.add_log_record_processor(BatchLogRecordProcessor(ConsoleLogExporter()))
+        else:
+            # NoOp default
+            pass
 
         # Attach to standard Python logging
         # We use a specific logger for the OTel bridge

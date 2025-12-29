@@ -15,6 +15,7 @@ from typing import Any, AsyncGenerator, Dict
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
+from loguru import logger
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from coreason_veritas.anchor import DeterminismInterceptor
@@ -50,18 +51,54 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
     # 3. Proxy: Forward to LLM Provider
-    # We only forward essential headers like Authorization
+    # Define Allowlist for headers
+    # We normalize to lowercase for checking
+    allowed_headers = {
+        "authorization",
+        "x-api-key",
+        "traceparent",
+        "tracestate",
+        "content-type",
+        "accept",
+        "user-agent",
+    }
+
     proxy_headers = {}
-    if "authorization" in headers:
-        proxy_headers["Authorization"] = headers["authorization"]
+    for key, value in headers.items():
+        if key.lower() in allowed_headers:
+            proxy_headers[key] = value
 
     client: httpx.AsyncClient = request.app.state.http_client
-    resp = await client.post(
-        LLM_PROVIDER_URL,
-        json=governed_body,
-        headers=proxy_headers,
-        timeout=60.0,
-    )
+
+    async def _forward_request(payload: Dict[str, Any]) -> httpx.Response:
+        return await client.post(
+            LLM_PROVIDER_URL,
+            json=payload,
+            headers=proxy_headers,
+            timeout=60.0,
+        )
+
+    try:
+        # Attempt 1: Strict Mode (with seed=42 injected by enforce_config)
+        resp = await _forward_request(governed_body)
+
+        # If the provider rejects the seed parameter (e.g. 400 Bad Request), retry without it
+        # Note: We assume 400 is the likely code for "Unknown parameter: seed"
+        if resp.status_code == 400 and "seed" in governed_body:
+            error_content = resp.text.lower()
+            if "seed" in error_content or "parameter" in error_content:
+                logger.warning("Provider rejected strict configuration. Retrying without 'seed' parameter.")
+
+                # Retry without seed
+                fallback_body = governed_body.copy()
+                fallback_body.pop("seed", None)
+                resp = await _forward_request(fallback_body)
+
+    except httpx.RequestError as exc:
+        # Network errors, etc.
+        logger.error(f"Proxy request failed: {exc}")
+        raise
+
     # We return the JSON response from the provider
     return resp.json()  # type: ignore[no-any-return]
 

@@ -8,15 +8,25 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import functools
 import json
 from typing import Any, Dict
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from loguru import logger
 
 from coreason_veritas.exceptions import AssetTamperedError
+
+
+@functools.lru_cache(maxsize=1)
+def load_public_key(pem_string: str) -> rsa.RSAPublicKey:
+    """
+    Loads and caches the public key from the PEM string.
+    Module-level cache ensures efficient reuse across validator instances.
+    """
+    return serialization.load_pem_public_key(pem_string.encode())
 
 
 class SignatureValidator:
@@ -49,10 +59,11 @@ class SignatureValidator:
         """
         try:
             # Load the public key
-            public_key = serialization.load_pem_public_key(self.key_store.encode())
+            public_key = load_public_key(self.key_store)
 
             # Canonicalize the asset_payload (JSON) to ensure consistent hashing
-            canonical_payload = json.dumps(asset_payload, sort_keys=True).encode()
+            # Use compact separators to ensure cross-platform consistency
+            canonical_payload = json.dumps(asset_payload, sort_keys=True, separators=(",", ":")).encode()
 
             # Verify the signature
             # The spec example uses PSS padding with MGF1 and SHA256

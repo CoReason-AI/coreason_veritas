@@ -43,7 +43,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -133,13 +133,14 @@ async def test_governed_execution_missing_args(key_pair: Tuple[RSAPrivateKey, st
     async def protected_function(spec: Any, sig: Any, user: Any) -> str:
         return "Should not reach here"
 
-    with pytest.raises(ValueError, match="Missing signature argument"):
+    # inspect.signature.bind raises TypeError for missing arguments before our logic runs
+    with pytest.raises(TypeError, match="missing a required argument: 'sig'"):
         await protected_function(spec={"a": 1}, user="u")  # Missing sig
 
-    with pytest.raises(ValueError, match="Missing asset argument"):
+    with pytest.raises(TypeError, match="missing a required argument: 'spec'"):
         await protected_function(sig="abc", user="u")  # Missing spec
 
-    with pytest.raises(ValueError, match="Missing user ID argument"):
+    with pytest.raises(TypeError, match="missing a required argument: 'user'"):
         await protected_function(spec={"a": 1}, sig="abc")  # Missing user
 
 
@@ -271,8 +272,8 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
-    Test that calling the governed function with positional arguments fails
-    because the wrapper expects keyword arguments for verification.
+    Test that calling the governed function with positional arguments succeeds
+    because the wrapper now binds arguments using inspect.signature.
     """
     private_key, public_key_pem = key_pair
     payload = {"data": "secure"}
@@ -288,12 +289,9 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
             async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
                 return "OK"
 
-            # Passing arguments positionally
-            # wrapper looks for kwargs.get("spec") etc., which will be None
-            with pytest.raises(ValueError, match="Missing asset argument"):
-                # This simulates `protected_function(payload, signature, "u")`
-                # but since we are calling the wrapper, we pass them as positional args to the wrapper
-                await protected_function(payload, signature, "user-123")
+            # Passing arguments positionally should now work
+            result = await protected_function(payload, signature, "user-123")
+            assert result == "OK"
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -428,3 +426,21 @@ async def test_governed_execution_strict_mode_enforced(key_pair: Tuple[RSAPrivat
         # Execute without signature
         with pytest.raises(ValueError, match="Missing signature argument"):
             await strict_function(spec=payload, sig=None, user="strict-user")
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_none_args(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test failure if arguments are explicitly passed as None (bypassing inspect checks).
+    """
+
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+    async def protected_function(spec: Optional[Dict[str, Any]], sig: Optional[str], user: Optional[str]) -> str:
+        return "Should not reach here"
+
+    # Explicitly pass None to trigger ValueError in _perform_gatekeeping
+    with pytest.raises(ValueError, match="Missing asset argument"):
+        await protected_function(spec=None, sig="s", user="u")
+
+    with pytest.raises(ValueError, match="Missing user ID argument"):
+        await protected_function(spec={"a": 1}, sig="s", user=None)
