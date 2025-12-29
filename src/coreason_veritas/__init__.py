@@ -26,6 +26,7 @@ __email__ = "gowtham.rao@coreason.ai"
 
 __all__ = ["governed_execution", "SignatureValidator", "DeterminismInterceptor"]
 
+
 def initialize() -> None:
     """
     Explicitly initializes the Veritas Engine and emits the handshake audit log.

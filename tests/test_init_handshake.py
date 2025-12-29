@@ -83,6 +83,7 @@ def test_init_audit_handshake_failure(caplog: Any) -> None:
         try:
             with caplog.at_level(logging.ERROR, logger="coreason.veritas"):
                 import coreason_veritas
+
                 coreason_veritas.initialize()
 
                 # Verify error log
