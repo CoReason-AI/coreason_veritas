@@ -12,7 +12,7 @@ import asyncio
 import inspect
 import json
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -290,7 +290,7 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
 
             # Passing arguments positionally
             # wrapper looks for kwargs.get("spec") etc., which will be None
-            with pytest.raises(ValueError, match="Missing signature argument"):
+            with pytest.raises(ValueError, match="Missing asset argument"):
                 # This simulates `protected_function(payload, signature, "u")`
                 # but since we are calling the wrapper, we pass them as positional args to the wrapper
                 await protected_function(payload, signature, "user-123")
@@ -367,3 +367,64 @@ def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) ->
 
             # Verify Auditor
             mock_tracer.start_as_current_span.assert_called_once()
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_draft_mode(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test Draft Mode execution where signatures are bypassed.
+    """
+    _, public_key_pem = key_pair
+    payload = {"data": "draft"}
+
+    # Even without key store or signature, this should pass in draft mode
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+
+            @governed_execution(
+                asset_id_arg="spec",
+                signature_arg="sig",
+                user_id_arg="user",
+                allow_unsigned=True,  # Enable Draft Mode
+            )
+            async def draft_function(spec: Dict[str, Any], sig: Optional[str], user: str) -> str:
+                return "draft_success"
+
+            # Execute without signature (None)
+            result = await draft_function(spec=payload, sig=None, user="draft-user")
+
+            assert result == "draft_success"
+
+            # Verify Span Attributes contain DRAFT tag
+            mock_tracer.start_as_current_span.assert_called_once()
+            _, kwargs = mock_tracer.start_as_current_span.call_args
+            attributes = kwargs["attributes"]
+            assert attributes["co.compliance_mode"] == "DRAFT"
+            assert "co.srb_sig" not in attributes
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_strict_mode_enforced(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """
+    Test that strict mode (allow_unsigned=False) still enforces signatures.
+    """
+    _, public_key_pem = key_pair
+    payload = {"data": "strict"}
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+
+        @governed_execution(
+            asset_id_arg="spec",
+            signature_arg="sig",
+            user_id_arg="user",
+            allow_unsigned=False,  # Strict Mode (Explicit)
+        )
+        async def strict_function(spec: Dict[str, Any], sig: Optional[str], user: str) -> str:
+            return "should_fail"
+
+        # Execute without signature
+        with pytest.raises(ValueError, match="Missing signature argument"):
+            await strict_function(spec=payload, sig=None, user="strict-user")
