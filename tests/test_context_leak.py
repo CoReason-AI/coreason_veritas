@@ -1,15 +1,16 @@
-
 import asyncio
-import contextvars
-from typing import Any, Dict, List
-import pytest
-from coreason_veritas.anchor import is_anchor_active, DeterminismInterceptor
 
-@pytest.mark.asyncio
+import pytest
+
+from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_context_propagation_asyncio_gather() -> None:
     """
     Test that the Anchor context variable propagates correctly across asyncio.gather tasks.
     """
+
     async def worker(idx: int) -> bool:
         # Check if anchor is active inside the worker
         return is_anchor_active()
@@ -24,11 +25,12 @@ async def test_context_propagation_asyncio_gather() -> None:
         assert all(results), "Anchor should be active in all gathered tasks"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_context_propagation_create_task() -> None:
     """
     Test that the Anchor context variable propagates to tasks created with create_task.
     """
+
     async def worker() -> bool:
         return is_anchor_active()
 
@@ -42,7 +44,7 @@ async def test_context_propagation_create_task() -> None:
     assert is_anchor_active() is False
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_context_leak_prevention() -> None:
     """
     Test that the Anchor context does not leak to parallel tasks started outside the scope.
@@ -52,7 +54,7 @@ async def test_context_leak_prevention() -> None:
     finish_event = asyncio.Event()
 
     async def long_running_ungoverned_task() -> bool:
-        await start_event.wait() # Wait for governed task to start
+        await start_event.wait()  # Wait for governed task to start
         # At this point, the governed task is running with anchor active.
         # This task should NOT see it.
         status = is_anchor_active()
@@ -61,8 +63,8 @@ async def test_context_leak_prevention() -> None:
 
     async def governed_task() -> None:
         with DeterminismInterceptor.scope():
-            start_event.set() # Signal that we are in the scope
-            await finish_event.wait() # Wait for ungoverned task to check
+            start_event.set()  # Signal that we are in the scope
+            await finish_event.wait()  # Wait for ungoverned task to check
 
     # Start ungoverned task
     t1 = asyncio.create_task(long_running_ungoverned_task())
