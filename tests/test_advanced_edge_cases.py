@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import governed_execution
+from coreason_veritas.wrapper import governed_execution, get_public_key_from_store
 
 # --- Fixtures & Helpers ---
 
@@ -256,6 +256,7 @@ async def test_dynamic_key_rotation(key_pair: Tuple[RSAPrivateKey, str]) -> None
 
         # 1. Start with Key A
         with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": pub_a}):
+            get_public_key_from_store.cache_clear()
             # A should pass
             assert await protected_op(spec=payload, sig=sig_a, user="u") == "success"
             # B should fail
@@ -264,6 +265,7 @@ async def test_dynamic_key_rotation(key_pair: Tuple[RSAPrivateKey, str]) -> None
 
         # 2. Rotate to Key B
         with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": pub_b}):
+            get_public_key_from_store.cache_clear()
             # B should pass now
             assert await protected_op(spec=payload, sig=sig_b, user="u") == "success"
             # A should fail now
