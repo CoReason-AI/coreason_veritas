@@ -323,7 +323,6 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
-@pytest.mark.xfail(reason="Recursion depth or cache interaction causing AssetTamperedError in test harness")  # type: ignore[misc]
 async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test recursive calls to a governed function.
