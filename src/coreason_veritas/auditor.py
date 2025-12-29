@@ -9,17 +9,16 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import contextlib
-import logging
 import os
 import platform
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generator, List, Optional
 
-from loguru import logger as loguru_logger
+from loguru import logger
 from opentelemetry import _logs, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import (
     BatchLogRecordProcessor,
     ConsoleLogRecordExporter,
@@ -34,6 +33,7 @@ from opentelemetry.sdk.trace.export import (
 )
 
 from coreason_veritas.anchor import is_anchor_active
+from coreason_veritas.logging_utils import configure_logging
 
 
 class IERLogger:
@@ -62,7 +62,7 @@ class IERLogger:
         """
         if self._initialized:
             if getattr(self, "_service_name", None) != service_name:
-                loguru_logger.warning(
+                logger.warning(
                     f"IERLogger already initialized with service_name='{self._service_name}'. "
                     f"Ignoring new service_name='{service_name}'."
                 )
@@ -91,9 +91,6 @@ class IERLogger:
             tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 
         # Guard: Check if a tracer provider is already set to avoid warnings/errors
-        # Note: trace.get_tracer_provider() returns a ProxyTracerProvider by default if not set.
-        # But set_tracer_provider is the one that sets the global.
-        # Since this is a singleton, we assume we control the initialization.
         trace.set_tracer_provider(tp)
         self.tracer = trace.get_tracer("veritas.audit")
 
@@ -108,17 +105,8 @@ class IERLogger:
         else:
             lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
-        # Attach to standard Python logging
-        # We use a specific logger for the OTel bridge
-        self.otel_bridge_logger = logging.getLogger("coreason.veritas")
-
-        # Check if LoggingHandler is already attached to avoid duplicates/memory leaks
-        has_logging_handler = any(h.__class__.__name__ == "LoggingHandler" for h in self.otel_bridge_logger.handlers)
-
-        if not has_logging_handler:
-            handler = LoggingHandler(level=logging.INFO, logger_provider=lp)
-            self.otel_bridge_logger.addHandler(handler)
-            self.otel_bridge_logger.setLevel(logging.INFO)
+        # Configure Loguru to use OTel Sink
+        configure_logging()
 
         self._sinks: List[Callable[[Dict[str, Any]], None]] = []
         self._initialized = True
@@ -139,10 +127,11 @@ class IERLogger:
         Args:
             version: The version string of the package.
         """
-        # This goes to OTel via the bridge logger
-        self.otel_bridge_logger.info(
-            "Veritas Engine Initialized", extra={"co.veritas.version": version, "co.governance.status": "active"}
-        )
+        # Unified logging via Loguru
+        logger.bind(
+            co_veritas_version=version,
+            co_governance_status="active"
+        ).info("Veritas Engine Initialized")
 
     @contextlib.contextmanager
     def start_governed_span(self, name: str, attributes: Dict[str, str]) -> Generator[trace.Span, None, None]:
@@ -180,7 +169,7 @@ class IERLogger:
 
         if missing:
             error_msg = f"Audit Failure: Missing mandatory attributes: {missing}"
-            loguru_logger.error(error_msg)
+            logger.error(error_msg)
             raise ValueError(error_msg)
 
         with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
@@ -196,7 +185,7 @@ class IERLogger:
                     sink(event_payload)
                 except Exception as e:
                     # Fail Closed: If an audit sink fails, the entire operation must fail.
-                    loguru_logger.error(f"Audit Sink Failure: {e}")
+                    logger.exception(f"Audit Sink Failure: {e}")
                     raise e
 
             yield span
