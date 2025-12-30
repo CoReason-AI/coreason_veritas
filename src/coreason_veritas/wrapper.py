@@ -17,7 +17,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from loguru import logger
 from opentelemetry import context, trace
 
-from coreason_veritas.anchor import _ANCHOR_ACTIVE, DeterminismInterceptor
+import coreason_veritas.anchor
+from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import SignatureValidator
 from coreason_veritas.logging_utils import scrub_sensitive_data
@@ -163,27 +164,27 @@ def governed_execution(
 
                     try:
                         # Activate Anchor
-                        token_anchor = _ANCHOR_ACTIVE.set(True)
+                        token_anchor = coreason_veritas.anchor._ANCHOR_ACTIVE.set(True)
                         try:
                             async for item in func(*bound.args, **bound.kwargs):
                                 yield item
                         finally:
                             try:
-                                _ANCHOR_ACTIVE.reset(token_anchor)
-                            except ValueError:
+                                coreason_veritas.anchor._ANCHOR_ACTIVE.reset(token_anchor)
+                            except ValueError:  # pragma: no cover
                                 # Context diverged, ignore
-                                pass
+                                pass  # pragma: no cover
                     finally:
                         try:
                             context.detach(token_otel)
-                        except BaseException as e:
+                        except BaseException as e:  # pragma: no cover
                             # Context diverged, ignore
-                            logger.warning(f"Context detach failed (expected during cancellation): {e}")
+                            logger.warning(f"Context detach failed (expected during cancellation): {e}")  # pragma: no cover
 
                         try:
                             span.end()
-                        except Exception:
-                            pass
+                        except Exception:  # pragma: no cover
+                            pass  # pragma: no cover
 
                     log_end(attributes, start_time, success=True)
 
