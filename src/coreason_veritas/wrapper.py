@@ -179,7 +179,9 @@ def governed_execution(
                             context.detach(token_otel)
                         except BaseException as e:  # pragma: no cover
                             # Context diverged, ignore
-                            logger.warning(f"Context detach failed (expected during cancellation): {e}")  # pragma: no cover
+                            logger.warning(
+                                f"Context detach failed (expected during cancellation): {e}"
+                            )  # pragma: no cover
 
                         try:
                             span.end()
