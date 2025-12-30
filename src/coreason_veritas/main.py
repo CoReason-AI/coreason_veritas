@@ -75,7 +75,7 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
 FastAPIInstrumentor.instrument_app(app)
 
 
-@logger.catch
+@logger.catch  # type: ignore[misc]
 def run_server() -> None:
     """Entry point for the veritas-proxy command. Configured via ENV."""
     host = os.environ.get("VERITAS_HOST", "0.0.0.0")

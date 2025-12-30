@@ -11,7 +11,8 @@
 import logging
 import os
 import sys
-from typing import Any, Dict
+from types import FrameType
+from typing import Any, Dict, Optional
 
 from loguru import logger
 from opentelemetry import _logs, trace
@@ -151,7 +152,8 @@ class InterceptHandler(logging.Handler):
             level = str(record.levelno)
 
         # Find caller from where originated the logged message
-        frame, depth = logging.currentframe(), 2
+        frame: Optional[FrameType] = logging.currentframe()
+        depth = 2
         while frame and frame.f_code.co_filename == logging.__file__:
             frame = frame.f_back
             depth += 1
@@ -189,14 +191,7 @@ def configure_logging() -> None:
         logger.add(sys.stderr, level=log_level, format=fmt)
 
     # 2. File Sink (Machine Readable JSON)
-    logger.add(
-        "logs/app.log",
-        rotation="500 MB",
-        retention="10 days",
-        serialize=True,
-        enqueue=True,
-        level=log_level
-    )
+    logger.add("logs/app.log", rotation="500 MB", retention="10 days", serialize=True, enqueue=True, level=log_level)
 
     # 3. OpenTelemetry Sink
     otel_sink = OTelLogSink()

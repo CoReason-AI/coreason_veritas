@@ -251,7 +251,7 @@ class TestLoggingUtils(unittest.TestCase):
         mock_record_std.name = "test.logger"
 
         with patch.object(logger, "opt") as mock_opt:
-             # Make sure log() is called on the result of opt()
+            # Make sure log() is called on the result of opt()
             mock_log_func = MagicMock()
             mock_opt.return_value.log = mock_log_func
 
@@ -294,7 +294,7 @@ class TestLoggingUtils(unittest.TestCase):
             # Link frames
             frame_logging_1.f_back = frame_logging_2
             frame_logging_2.f_back = frame_app
-            frame_app.f_back = None # End of stack
+            frame_app.f_back = None  # End of stack
 
             mock_frame.return_value = frame_logging_1
 
