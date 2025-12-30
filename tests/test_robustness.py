@@ -1,4 +1,3 @@
-
 import importlib
 import os
 from typing import Any, Dict
@@ -108,6 +107,7 @@ def test_auditor_init_tracer_provider_failure() -> None:
             _ = IERLogger()
             # Should catch exception and log warning
             mock_warning.assert_called()
+
 
 # --- Wrapper Coverage ---
 # Tests removed due to coverage/mocking issues with defensive blocks.
