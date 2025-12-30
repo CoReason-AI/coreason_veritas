@@ -183,10 +183,7 @@ def governed_execution(
                                 f"Context detach failed (expected during cancellation): {e}"
                             )  # pragma: no cover
 
-                        try:
-                            span.end()
-                        except Exception:  # pragma: no cover
-                            pass  # pragma: no cover
+                        span.end()
 
                     log_end(attributes, start_time, success=True)
 
