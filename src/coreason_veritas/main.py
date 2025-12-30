@@ -15,6 +15,7 @@ from typing import Any, AsyncGenerator, Dict
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
+from loguru import logger
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 import coreason_veritas
@@ -74,6 +75,7 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
 FastAPIInstrumentor.instrument_app(app)
 
 
+@logger.catch
 def run_server() -> None:
     """Entry point for the veritas-proxy command. Configured via ENV."""
     host = os.environ.get("VERITAS_HOST", "0.0.0.0")
