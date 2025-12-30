@@ -8,12 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import logging
 import os
 import sys
 import types
-from typing import Any
 from unittest.mock import MagicMock, patch
+
+from loguru import logger
 
 
 def _unload_coreason_veritas() -> None:
@@ -23,7 +23,7 @@ def _unload_coreason_veritas() -> None:
         del sys.modules[m]
 
 
-def test_init_audit_handshake(caplog: Any) -> None:
+def test_init_audit_handshake() -> None:
     """
     Test that calling initialize() triggers the audit handshake.
     """
@@ -61,11 +61,16 @@ def test_init_audit_handshake(caplog: Any) -> None:
                 del sys.modules["coreason_veritas"]
 
 
-def test_init_audit_handshake_failure(caplog: Any) -> None:
+def test_init_audit_handshake_failure() -> None:
     """
     Test that failures in handshake are logged but don't crash.
     """
     _unload_coreason_veritas()
+
+    # We need to capture the Loguru log.
+    # We can use a simple sink list.
+    captured_logs = []
+    logger.add(lambda msg: captured_logs.append(msg))
 
     # Enable Handshake by unsetting TEST_MODE
     with patch.dict(os.environ):
@@ -81,13 +86,17 @@ def test_init_audit_handshake_failure(caplog: Any) -> None:
         sys.modules["coreason_veritas.auditor"] = mock_auditor_module
 
         try:
-            with caplog.at_level(logging.ERROR, logger="coreason.veritas"):
-                import coreason_veritas
+            import coreason_veritas
 
-                coreason_veritas.initialize()
+            coreason_veritas.initialize()
 
-                # Verify error log
-                assert "MACO Audit Link Failed: Simulated Failure" in caplog.text
+            # Verify error log in Loguru sink
+            found = False
+            for msg in captured_logs:
+                if "MACO Audit Link Failed: Simulated Failure" in msg:
+                    found = True
+                    break
+            assert found, f"Expected error message not found in logs: {captured_logs}"
 
         finally:
             if "coreason_veritas.auditor" in sys.modules:
