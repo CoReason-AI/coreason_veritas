@@ -10,13 +10,15 @@
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Dict
+from typing import AsyncGenerator
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from starlette.background import BackgroundTask
 
 import coreason_veritas
 from coreason_veritas.anchor import DeterminismInterceptor
@@ -43,9 +45,10 @@ LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "https://api.openai.com/v1
 
 
 @app.post("/v1/chat/completions")  # type: ignore[misc]
-async def governed_inference(request: Request) -> Dict[str, Any]:
+async def governed_inference(request: Request) -> StreamingResponse:
     """
     Gateway Proxy endpoint that enforces determinism and forwards requests to the LLM provider.
+    Supports streaming responses.
     """
     # 1. Parse Request
     raw_body = await request.json()
@@ -61,14 +64,22 @@ async def governed_inference(request: Request) -> Dict[str, Any]:
         proxy_headers["Authorization"] = headers["authorization"]
 
     client: httpx.AsyncClient = request.app.state.http_client
-    resp = await client.post(
+
+    req = client.build_request(
+        "POST",
         LLM_PROVIDER_URL,
         json=governed_body,
         headers=proxy_headers,
-        timeout=60.0,
+        timeout=60.0
     )
-    # We return the JSON response from the provider
-    return resp.json()  # type: ignore[no-any-return]
+    r = await client.send(req, stream=True)
+
+    return StreamingResponse(
+        r.aiter_bytes(),
+        status_code=r.status_code,
+        media_type=r.headers.get("content-type"),
+        background=BackgroundTask(r.aclose)
+    )
 
 
 # Instrument the app

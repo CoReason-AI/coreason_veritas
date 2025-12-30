@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import _prepare_governance, get_public_key_from_store, governed_execution
+from coreason_veritas.wrapper import _prepare_governance, governed_execution
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -58,7 +58,6 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
 
     # Set Env Var for Key Store
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "secure"}
         signature = sign_payload(payload, private_key)
 
@@ -95,7 +94,6 @@ async def test_governed_execution_tampered(key_pair: Tuple[RSAPrivateKey, str]) 
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "secure"}
         signature = sign_payload(payload, private_key)
         tampered_payload = {"data": "hacked"}
@@ -171,7 +169,6 @@ async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "concurrent"}
         signature = sign_payload(payload, private_key)
 
@@ -207,7 +204,6 @@ async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateK
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "error"}
         signature = sign_payload(payload, private_key)
 
@@ -245,7 +241,6 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
     sig_inner = sign_payload(payload_inner, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         # Mock Tracer
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
@@ -288,7 +283,6 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
@@ -319,7 +313,6 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
@@ -353,7 +346,6 @@ def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) ->
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "sync"}
         signature = sign_payload(payload, private_key)
 
@@ -457,7 +449,6 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     kwargs = {"asset": asset, "sig": sig_val, "user": user_val}
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
 
         attributes, bound = _prepare_governance(
             func=mock_func,
@@ -496,7 +487,6 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
     kwargs: Dict[str, Any] = {}
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
 
         attributes, bound = _prepare_governance(
             func=mock_func,
@@ -525,7 +515,6 @@ def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) ->
     sig_val = sign_payload(asset, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
 
         attributes, bound = _prepare_governance(
             func=mock_func,
@@ -548,7 +537,6 @@ def test_governed_execution_sync_exception_handling(key_pair: Tuple[RSAPrivateKe
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "error"}
         signature = sign_payload(payload, private_key)
 
@@ -574,7 +562,6 @@ def test_governed_execution_generator_exception_handling(key_pair: Tuple[RSAPriv
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "gen_error"}
         signature = sign_payload(payload, private_key)
 
@@ -605,7 +592,6 @@ async def test_governed_execution_asyncgen_exception_handling(key_pair: Tuple[RS
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        get_public_key_from_store.cache_clear()
         payload = {"data": "asyncgen_error"}
         signature = sign_payload(payload, private_key)
 
@@ -626,5 +612,5 @@ async def test_governed_execution_asyncgen_exception_handling(key_pair: Tuple[RS
             with pytest.raises(RuntimeError, match="Planned asyncgen failure"):
                 await anext(gen)
 
-            # Verify Span started
-            mock_tracer.start_as_current_span.assert_called_once()
+            # Verify Span started (using start_span for async generators now)
+            mock_tracer.start_span.assert_called_once()

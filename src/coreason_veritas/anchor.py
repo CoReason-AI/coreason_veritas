@@ -10,6 +10,7 @@
 
 import contextlib
 import copy
+import os
 from contextvars import ContextVar
 from typing import Any, Dict, Generator
 
@@ -60,7 +61,7 @@ class DeterminismInterceptor:
         # Enforce values
         sanitized["temperature"] = 0.0
         sanitized["top_p"] = 1.0
-        sanitized["seed"] = 42
+        sanitized["seed"] = int(os.getenv("VERITAS_SEED", 42))
 
         return sanitized
 
@@ -75,4 +76,9 @@ class DeterminismInterceptor:
         try:
             yield
         finally:
-            _ANCHOR_ACTIVE.reset(token)
+            try:
+                _ANCHOR_ACTIVE.reset(token)
+            except ValueError:
+                # This can happen during async cancellation if the context has diverged.
+                # Since we are exiting the scope anyway, it is safe to ignore.
+                pass
