@@ -188,8 +188,7 @@ async def test_generator_interruption_cleanup(key_pair: Tuple[RSAPrivateKey, str
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with (
             patch("coreason_veritas.wrapper.IERLogger") as MockIERLogger,
-            patch("coreason_veritas.wrapper.DeterminismInterceptor") as MockAnchor,
-            patch("coreason_veritas.wrapper._ANCHOR_ACTIVE") as MockAnchorVar
+            patch("coreason_veritas.wrapper._ANCHOR_ACTIVE") as MockAnchorVar,
         ):
             mock_span = MagicMock()
             # For async generator, we use create_governed_span and manual span.end()

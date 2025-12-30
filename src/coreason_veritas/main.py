@@ -65,20 +65,14 @@ async def governed_inference(request: Request) -> StreamingResponse:
 
     client: httpx.AsyncClient = request.app.state.http_client
 
-    req = client.build_request(
-        "POST",
-        LLM_PROVIDER_URL,
-        json=governed_body,
-        headers=proxy_headers,
-        timeout=60.0
-    )
+    req = client.build_request("POST", LLM_PROVIDER_URL, json=governed_body, headers=proxy_headers, timeout=60.0)
     r = await client.send(req, stream=True)
 
     return StreamingResponse(
         r.aiter_bytes(),
         status_code=r.status_code,
         media_type=r.headers.get("content-type"),
-        background=BackgroundTask(r.aclose)
+        background=BackgroundTask(r.aclose),
     )
 
 

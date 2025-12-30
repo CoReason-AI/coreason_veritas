@@ -86,16 +86,14 @@ def scrub_sensitive_data(
         elif isinstance(data, set):
             # Convert set to sorted list if possible for deterministic logging, else just list
             try:
-                    return sorted([
-                        scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data
-                    ])
+                return sorted([scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data])
             except TypeError:
                 # Fallback if items are not comparable
                 return [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
         elif hasattr(data, "__dict__"):
             # Attempt to serialize object __dict__ if present
             # We treat this as a dict but need to be careful not to recurse infinitely if __dict__ is complex
-                # We'll just convert to string representation for safety and simplicity as per "Enhance it"
+            # We'll just convert to string representation for safety and simplicity as per "Enhance it"
             return str(data)
         else:
             return data

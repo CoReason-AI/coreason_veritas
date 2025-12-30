@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
-from typing import Generator
+from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -53,8 +53,9 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
     mock_response.headers = {"content-type": "application/json"}
 
     # Mock aiter_bytes for streaming response
-    async def iter_bytes():
+    async def iter_bytes() -> AsyncGenerator[bytes, None]:
         yield b'{"id": "chatcmpl-123", "choices": [{"message": {"content": "Hello world"}}]}'
+
     mock_response.aiter_bytes.return_value = iter_bytes()
     mock_response.aclose = AsyncMock()
 
@@ -111,8 +112,10 @@ def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
-        async def iter_bytes():
+
+        async def iter_bytes() -> AsyncGenerator[bytes, None]:
             yield b"{}"
+
         mock_response.aiter_bytes.return_value = iter_bytes()
         mock_response.aclose = AsyncMock()
         mock_httpx_client.send.return_value = mock_response
@@ -146,8 +149,10 @@ def test_governed_inference_missing_auth_header(client: TestClient, mock_httpx_c
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.headers = {"content-type": "application/json"}
-    async def iter_bytes():
+
+    async def iter_bytes() -> AsyncGenerator[bytes, None]:
         yield b"{}"
+
     mock_response.aiter_bytes.return_value = iter_bytes()
     mock_response.aclose = AsyncMock()
     mock_httpx_client.send.return_value = mock_response
@@ -167,8 +172,10 @@ def test_governed_inference_upstream_error(client: TestClient, mock_httpx_client
     mock_response = MagicMock()
     mock_response.status_code = 500
     mock_response.headers = {"content-type": "application/json"}
-    async def iter_bytes():
+
+    async def iter_bytes() -> AsyncGenerator[bytes, None]:
         yield b'{"error": "Internal Server Error"}'
+
     mock_response.aiter_bytes.return_value = iter_bytes()
     mock_response.aclose = AsyncMock()
     mock_httpx_client.send.return_value = mock_response

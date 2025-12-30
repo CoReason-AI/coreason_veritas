@@ -449,7 +449,6 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     kwargs = {"asset": asset, "sig": sig_val, "user": user_val}
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-
         attributes, bound = _prepare_governance(
             func=mock_func,
             args=args,
@@ -487,7 +486,6 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
     kwargs: Dict[str, Any] = {}
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-
         attributes, bound = _prepare_governance(
             func=mock_func,
             args=args,
@@ -515,7 +513,6 @@ def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) ->
     sig_val = sign_payload(asset, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-
         attributes, bound = _prepare_governance(
             func=mock_func,
             args=(),
