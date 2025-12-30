@@ -10,7 +10,7 @@
 
 import os
 import sys
-from typing import Any, Dict, List, Union
+from typing import Any, Dict
 
 from loguru import logger
 from opentelemetry import _logs, trace

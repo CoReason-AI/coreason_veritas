@@ -121,9 +121,7 @@ def governed_execution(
             # Scrub arguments
             safe_args = scrub_sensitive_data(bound.arguments)
             logger.bind(**attributes).info(
-                "Governance Execution Started",
-                safe_payload=safe_args,
-                function=func.__name__
+                "Governance Execution Started", safe_payload=safe_args, function=func.__name__
             )
 
         def log_end(attributes: Dict[str, str], start_time: float, success: bool = True) -> None:
@@ -133,7 +131,7 @@ def governed_execution(
                 "Governance Execution Completed",
                 duration_ms=duration_ms,
                 verdict=verdict,
-                function=func.__name__
+                function=func.__name__,
             )
 
         if inspect.isasyncgenfunction(func):
@@ -164,7 +162,7 @@ def governed_execution(
                 except Exception as e:
                     # If attributes is not defined (prepare governance failed), we try to get what we can
                     # but typically we just log error.
-                    if 'attributes' not in locals():
+                    if "attributes" not in locals():
                         attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
 
                     logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
@@ -198,7 +196,7 @@ def governed_execution(
                     log_end(attributes, start_time, success=True)
 
                 except Exception as e:
-                    if 'attributes' not in locals():
+                    if "attributes" not in locals():
                         attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
                     logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
                     log_end(attributes, start_time, success=False)
@@ -234,7 +232,7 @@ def governed_execution(
                     return result
 
                 except Exception as e:
-                    if 'attributes' not in locals():
+                    if "attributes" not in locals():
                         attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
                     logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
                     log_end(attributes, start_time, success=False)
@@ -270,7 +268,7 @@ def governed_execution(
                     return result
 
                 except Exception as e:
-                    if 'attributes' not in locals():
+                    if "attributes" not in locals():
                         attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
                     logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
                     log_end(attributes, start_time, success=False)

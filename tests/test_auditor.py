@@ -112,10 +112,7 @@ def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
         logger_instance.emit_handshake(version)
 
         # Verify bind called with structure
-        mock_logger.bind.assert_called_once_with(
-            co_veritas_version=version,
-            co_governance_status="active"
-        )
+        mock_logger.bind.assert_called_once_with(co_veritas_version=version, co_governance_status="active")
         # Verify info called on the bound logger
         mock_logger.bind.return_value.info.assert_called_once_with("Veritas Engine Initialized")
 

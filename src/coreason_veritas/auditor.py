@@ -128,10 +128,7 @@ class IERLogger:
             version: The version string of the package.
         """
         # Unified logging via Loguru
-        logger.bind(
-            co_veritas_version=version,
-            co_governance_status="active"
-        ).info("Veritas Engine Initialized")
+        logger.bind(co_veritas_version=version, co_governance_status="active").info("Veritas Engine Initialized")
 
     @contextlib.contextmanager
     def start_governed_span(self, name: str, attributes: Dict[str, str]) -> Generator[trace.Span, None, None]:

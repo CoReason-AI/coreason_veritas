@@ -9,6 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import unittest
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 from loguru import logger
@@ -64,7 +65,7 @@ class TestLoggingUtils(unittest.TestCase):
 
         # Inject Mock Logger directly (avoiding import patching issues)
         mock_otel_logger = MagicMock()
-        sink._logger = mock_otel_logger  # type: ignore
+        sink._logger = mock_otel_logger
 
         # Manually invoke call with a mock loguru message
         mock_message = MagicMock()
@@ -99,14 +100,14 @@ class TestLoggingUtils(unittest.TestCase):
 
     def test_otel_sink_severity_mapping(self) -> None:
         sink = OTelLogSink()
-        sink._logger = MagicMock()  # type: ignore
+        sink._logger = MagicMock()
 
         levels = [
-            (5, 5),   # Trace
+            (5, 5),  # Trace
             (20, 9),  # Info
-            (30, 13), # Warning
-            (40, 17), # Error
-            (50, 21), # Critical
+            (30, 13),  # Warning
+            (40, 17),  # Error
+            (50, 21),  # Critical
         ]
 
         for loguru_no, otel_severity in levels:
@@ -120,7 +121,7 @@ class TestLoggingUtils(unittest.TestCase):
                 "module": "m",
                 "extra": {
                     "trace_id": "skip_me",
-                    "complex": {"a": 1} # Should trigger str() conversion
+                    "complex": {"a": 1},  # Should trigger str() conversion
                 },
                 "message": "m",
             }
@@ -145,8 +146,9 @@ class TestLoggingUtils(unittest.TestCase):
             mock_provider.get_logger.assert_called_with(sink.service_name)
 
     def test_trace_context_patcher(self) -> None:
-        from coreason_veritas.logging_utils import _trace_context_patcher
         from unittest.mock import patch
+
+        from coreason_veritas.logging_utils import _trace_context_patcher
 
         # Test with valid span
         with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
@@ -156,9 +158,9 @@ class TestLoggingUtils(unittest.TestCase):
             mock_ctx.span_id = 0x456
             mock_get_span.return_value.get_span_context.return_value = mock_ctx
 
-            record = {"extra": {}}  # type: ignore
-            _trace_context_patcher(record)  # type: ignore
-            self.assertEqual(record["extra"]["trace_id"], f"{0x123:032x}")  # type: ignore
+            record: Dict[str, Any] = {"extra": {}}
+            _trace_context_patcher(record)
+            self.assertEqual(record["extra"]["trace_id"], f"{0x123:032x}")
 
         # Test with invalid span
         with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
@@ -166,16 +168,16 @@ class TestLoggingUtils(unittest.TestCase):
             mock_ctx.is_valid = False
             mock_get_span.return_value.get_span_context.return_value = mock_ctx
 
-            record = {"extra": {}}  # type: ignore
-            _trace_context_patcher(record)  # type: ignore
-            self.assertEqual(record["extra"]["trace_id"], "0" * 32)  # type: ignore
+            record = {"extra": {}}
+            _trace_context_patcher(record)
+            self.assertEqual(record["extra"]["trace_id"], "0" * 32)
 
         # Test with no span (None)
         with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
             mock_get_span.return_value = None
 
-            record = {"extra": {}}  # type: ignore
-            _trace_context_patcher(record)  # type: ignore
+            record = {"extra": {}}
+            _trace_context_patcher(record)
             # Should return without modifying if we assume extra is empty?
             pass
 
@@ -186,7 +188,6 @@ class TestLoggingUtils(unittest.TestCase):
             patch.object(logger, "add") as mock_add,
             patch.object(logger, "configure") as mock_configure,
         ):
-
             configure_logging()
 
             # Verify logger.remove was called
@@ -206,7 +207,6 @@ class TestLoggingUtils(unittest.TestCase):
             patch.object(logger, "add") as mock_add,
             patch.object(logger, "configure"),
         ):
-
             configure_logging()
 
             # Verify that add was called with serialize=True (for the console sink)

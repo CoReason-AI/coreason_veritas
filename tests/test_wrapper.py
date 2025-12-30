@@ -9,7 +9,6 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import inspect
 import json
 import os
 from typing import Any, Dict, Optional, Tuple
@@ -23,7 +22,6 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
 from coreason_veritas.wrapper import _prepare_governance, get_public_key_from_store, governed_execution
-from coreason_veritas.logging_utils import scrub_sensitive_data
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -586,7 +584,7 @@ def test_governed_execution_generator_exception_handling(key_pair: Tuple[RSAPriv
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
-            def failing_generator(spec: Dict[str, Any], sig: str, user: str):
+            def failing_generator(spec: Dict[str, Any], sig: str, user: str) -> Any:
                 yield "start"
                 raise RuntimeError("Planned generator failure")
 
@@ -617,7 +615,7 @@ async def test_governed_execution_asyncgen_exception_handling(key_pair: Tuple[RS
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
-            async def failing_asyncgen(spec: Dict[str, Any], sig: str, user: str):
+            async def failing_asyncgen(spec: Dict[str, Any], sig: str, user: str) -> Any:
                 yield "start"
                 raise RuntimeError("Planned asyncgen failure")
 
