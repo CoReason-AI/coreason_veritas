@@ -8,9 +8,11 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import logging
 import os
 import sys
-from typing import Any, Dict
+from types import FrameType
+from typing import Any, Dict, Optional
 
 from loguru import logger
 from opentelemetry import _logs, trace
@@ -137,19 +139,44 @@ def _trace_context_patcher(record: Dict[str, Any]) -> None:
         record["extra"]["span_id"] = "0" * 16
 
 
+class InterceptHandler(logging.Handler):
+    """
+    Intercept standard logging messages and redirect them to Loguru.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Get corresponding Loguru level if it exists
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = str(record.levelno)
+
+        # Find caller from where originated the logged message
+        frame: Optional[FrameType] = logging.currentframe()
+        depth = 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+
 def configure_logging() -> None:
     """
     Configures Loguru with:
     1. Console sink (Text or JSON)
-    2. OpenTelemetry sink
-    3. Context propagation patcher
+    2. File sink (JSON with Rotation)
+    3. OpenTelemetry sink
+    4. Context propagation patcher
+    5. Standard library logging interception
     """
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     log_format = os.environ.get("LOG_FORMAT", "TEXT").upper()
 
-    logger.remove()  # Remove default handler
+    # Remove default handler
+    logger.remove()
 
-    # 1. Console Sink
+    # 1. Console Sink (Human Readable or JSON)
     if log_format == "JSON":
         logger.add(sys.stderr, level=log_level, serialize=True)
     else:
@@ -163,9 +190,15 @@ def configure_logging() -> None:
         )
         logger.add(sys.stderr, level=log_level, format=fmt)
 
-    # 2. OpenTelemetry Sink
+    # 2. File Sink (Machine Readable JSON)
+    logger.add("logs/app.log", rotation="500 MB", retention="10 days", serialize=True, enqueue=True, level=log_level)
+
+    # 3. OpenTelemetry Sink
     otel_sink = OTelLogSink()
     logger.add(otel_sink, level=log_level)
 
-    # 3. Patcher
+    # 4. Patcher
     logger.configure(patcher=_trace_context_patcher)
+
+    # 5. Intercept Standard Library Logging
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)

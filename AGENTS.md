@@ -48,8 +48,7 @@ This project uses **Ruff** for Python linting/formatting, **Mypy** for typing, a
   * Strict static typing is encouraged.
   * Run checks with: poetry run mypy .
   * Avoid Any wherever possible.
-* **Logging:** Use loguru instead of the standard logging module.
-  * *Good:* from loguru import logger -> logger.info("...")
+* **Logging:** Use `loguru` exclusively. Standard `logging` module is forbidden.
 * **Licensing:** Every .py file must start with the standard license header.
 
 ### **Legal & Intellectual Property**
@@ -101,6 +100,31 @@ Adhere to 12-Factor App principles. Use these standard variable names:
   * DOCKER_HOST: If interacting with the Docker engine.
   * SSH_PRIVATE_KEY / SSH_USER: If managing remote connections.
   * AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: For AWS services.
+
+### **Logging & Observability**
+
+This project uses **Loguru** for all logging. The configuration is centralized in `src/coreason_veritas/logging_utils.py` and provides three output sinks:
+
+1.  **Console (stderr):** Text-formatted logs for developer readability.
+2.  **File (`logs/app.log`):** JSON-formatted logs with rotation (500 MB) and retention (10 days) for machine ingestion.
+3.  **OpenTelemetry:** Structured logs forwarded to the OTel collector for observability and the Immutable Execution Record (IER).
+
+**Usage Standard:**
+
+```python
+from loguru import logger
+
+# Usage inside an Agent/Module
+logger.info("Agent started task")
+
+try:
+    ...
+except Exception:
+    logger.exception("Agent failed")
+```
+
+**Intercepting Library Logs:**
+Standard library logs (from dependencies) are automatically intercepted and redirected to Loguru. No manual configuration is required for external libraries.
 
 ### **CI/CD Context**
 

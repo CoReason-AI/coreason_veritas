@@ -8,6 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import logging
 import unittest
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
@@ -15,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from loguru import logger
 
 from coreason_veritas.logging_utils import (
+    InterceptHandler,
     OTelLogSink,
     configure_logging,
     scrub_sensitive_data,
@@ -98,7 +100,11 @@ class TestLoggingUtils(unittest.TestCase):
         self.assertEqual(kwargs["attributes"]["custom_key"], "custom_value")
         self.assertEqual(kwargs["attributes"]["log.function"], "test_func")
 
-    def test_otel_sink_severity_mapping(self) -> None:
+    def test_otel_sink_severity_mapping_and_attributes(self) -> None:
+        """
+        Tests severity mapping AND attribute processing (extra fields).
+        Covers lines 150-151 (skipping trace_id) and 156-157 (str conversion).
+        """
         sink = OTelLogSink()
         sink._logger = MagicMock()
 
@@ -115,22 +121,33 @@ class TestLoggingUtils(unittest.TestCase):
             mock_message.record = {
                 "level": MagicMock(no=loguru_no, name="LEVEL"),
                 "time": MagicMock(timestamp=lambda: 1000.0),
-                "file": MagicMock(name="f"),
+                "file": MagicMock(name="f", path="p"),
                 "line": 1,
                 "function": "f",
                 "module": "m",
                 "extra": {
-                    "trace_id": "skip_me",
-                    "complex": {"a": 1},  # Should trigger str() conversion
+                    "trace_id": "should_be_skipped_in_attributes_loop",
+                    "span_id": "should_be_skipped_in_attributes_loop",
+                    "simple_str": "value",
+                    "simple_int": 123,
+                    "complex_obj": {"nested": "dict"},  # Should trigger str() conversion
                 },
                 "message": "m",
             }
             sink(mock_message)
             kwargs = sink._logger.emit.call_args[1]
             self.assertEqual(kwargs["severity_number"], otel_severity)
-            # Verify extra attributes
-            self.assertNotIn("trace_id", kwargs["attributes"])
-            self.assertEqual(kwargs["attributes"]["complex"], "{'a': 1}")
+
+            # Verify extra attributes logic
+            attrs = kwargs["attributes"]
+            # trace_id/span_id should be skipped
+            self.assertNotIn("trace_id", attrs)
+            self.assertNotIn("span_id", attrs)
+            # primitives should remain
+            self.assertEqual(attrs["simple_str"], "value")
+            self.assertEqual(attrs["simple_int"], 123)
+            # complex objects should be stringified
+            self.assertEqual(attrs["complex_obj"], "{'nested': 'dict'}")
 
     def test_otel_sink_lazy_init(self) -> None:
         # Patch the function in opentelemetry._logs
@@ -210,12 +227,85 @@ class TestLoggingUtils(unittest.TestCase):
             configure_logging()
 
             # Verify that add was called with serialize=True (for the console sink)
-            # Since we add multiple sinks, we check if ANY call has serialize=True
             calls = mock_add.call_args_list
-            json_sink_added = False
+            count_serialized = 0
             for call in calls:
                 if call.kwargs.get("serialize") is True:
-                    json_sink_added = True
-                    break
+                    count_serialized += 1
 
-            self.assertTrue(json_sink_added, "Expected JSON console sink to be added")
+            # Expect at least 2 (Console + File)
+            self.assertTrue(count_serialized >= 2, f"Expected 2 JSON sinks, found {count_serialized}")
+
+    def test_intercept_handler(self) -> None:
+        """
+        Test InterceptHandler captures standard logging and forwards to Loguru.
+        """
+        handler = InterceptHandler()
+
+        # Test 1: Standard Level
+        mock_record_std = MagicMock(spec=logging.LogRecord)
+        mock_record_std.levelname = "INFO"
+        mock_record_std.levelno = 20
+        mock_record_std.getMessage.return_value = "Standard Msg"
+        mock_record_std.exc_info = None
+        mock_record_std.name = "test.logger"
+
+        with patch.object(logger, "opt") as mock_opt:
+            # Make sure log() is called on the result of opt()
+            mock_log_func = MagicMock()
+            mock_opt.return_value.log = mock_log_func
+
+            handler.emit(mock_record_std)
+
+            # Verify Loguru was called with "INFO"
+            mock_log_func.assert_called_with("INFO", "Standard Msg")
+
+        # Test 2: Custom Level (ValueError path)
+        mock_record_custom = MagicMock(spec=logging.LogRecord)
+        mock_record_custom.levelname = "MY_CUSTOM_LEVEL"
+        mock_record_custom.levelno = 99
+        mock_record_custom.getMessage.return_value = "Custom Msg"
+        mock_record_custom.exc_info = None
+
+        with patch.object(logger, "opt") as mock_opt:
+            mock_log_func = MagicMock()
+            mock_opt.return_value.log = mock_log_func
+
+            # Force logger.level to raise ValueError
+            with patch.object(logger, "level", side_effect=ValueError):
+                handler.emit(mock_record_custom)
+
+            # Verify Loguru was called with string "99"
+            mock_log_func.assert_called_with("99", "Custom Msg")
+
+        # Test 3: Stack Depth Adjustment
+        # Simulate stack inside logging module
+        with patch("logging.currentframe") as mock_frame:
+            # Create a mock frame chain: logging -> logging -> app
+            frame_logging_1 = MagicMock()
+            frame_logging_1.f_code.co_filename = logging.__file__
+
+            frame_logging_2 = MagicMock()
+            frame_logging_2.f_code.co_filename = logging.__file__
+
+            frame_app = MagicMock()
+            frame_app.f_code.co_filename = "app.py"
+
+            # Link frames
+            frame_logging_1.f_back = frame_logging_2
+            frame_logging_2.f_back = frame_app
+            frame_app.f_back = None  # End of stack
+
+            mock_frame.return_value = frame_logging_1
+
+            with patch.object(logger, "opt") as mock_opt:
+                handler.emit(mock_record_std)
+
+                # Default depth is 2.
+                # Loop:
+                # 1. frame=logging_1 (logging), depth=2 -> frame=logging_2, depth=3
+                # 2. frame=logging_2 (logging), depth=3 -> frame=app, depth=4
+                # 3. frame=app (app != logging), break.
+                # Expected depth=4
+
+                mock_opt.assert_called_with(depth=4, exception=None)
