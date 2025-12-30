@@ -8,7 +8,6 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import logging
 from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
@@ -52,7 +51,7 @@ def mock_exporters() -> Generator[None, None, None]:
         patch("coreason_veritas.auditor.OTLPLogExporter"),
         patch("coreason_veritas.auditor.BatchSpanProcessor"),
         patch("coreason_veritas.auditor.BatchLogRecordProcessor"),
-        patch("coreason_veritas.auditor.LoggingHandler", spec=logging.Handler),
+        patch("coreason_veritas.auditor.configure_logging"),
     ):
         yield
 
@@ -107,15 +106,15 @@ def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test emit_handshake logs correct message."""
     logger_instance = IERLogger("test-service")
 
-    # Mock the internal logger
-    logger_instance.otel_bridge_logger = MagicMock()
+    # Mock loguru logger
+    with patch("coreason_veritas.auditor.logger") as mock_logger:
+        version = "1.0.0"
+        logger_instance.emit_handshake(version)
 
-    version = "1.0.0"
-    logger_instance.emit_handshake(version)
-
-    logger_instance.otel_bridge_logger.info.assert_called_once_with(
-        "Veritas Engine Initialized", extra={"co.veritas.version": version, "co.governance.status": "active"}
-    )
+        # Verify bind called with structure
+        mock_logger.bind.assert_called_once_with(co_veritas_version=version, co_governance_status="active")
+        # Verify info called on the bound logger
+        mock_logger.bind.return_value.info.assert_called_once_with("Veritas Engine Initialized")
 
 
 def test_start_governed_span_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
@@ -164,15 +163,16 @@ def test_start_governed_span_missing_attributes(mock_exporters: None, mock_trace
     """Test that missing mandatory attributes raise ValueError."""
     logger = IERLogger("test-service")
 
-    # Missing all
-    with pytest.raises(ValueError, match="Missing mandatory attributes"):
-        with logger.start_governed_span("test-span", {}):
-            pass
+    with patch("coreason_veritas.auditor.logger"):
+        # Missing all
+        with pytest.raises(ValueError, match="Missing mandatory attributes"):
+            with logger.start_governed_span("test-span", {}):
+                pass
 
-    # Missing one
-    with pytest.raises(ValueError, match="Missing mandatory attributes"):
-        with logger.start_governed_span("test-span", {"co.user_id": "u", "co.asset_id": "a"}):
-            pass
+        # Missing one
+        with pytest.raises(ValueError, match="Missing mandatory attributes"):
+            with logger.start_governed_span("test-span", {"co.user_id": "u", "co.asset_id": "a"}):
+                pass
 
     # Ensure no span was started
     mock_tracer.start_as_current_span.assert_not_called()
@@ -274,19 +274,6 @@ def test_initialization_env_var_precedence(
         assert args[0]["service.name"] == "env-service"
 
 
-def test_logging_handler_attached(mock_exporters: None, mock_logger_provider: MagicMock) -> None:
-    """Test that the python logging handler is correctly attached."""
-    with (
-        patch("coreason_veritas.auditor.trace.set_tracer_provider"),
-        patch("coreason_veritas.auditor._logs.set_logger_provider"),
-    ):
-        logger_instance = IERLogger("test-service")
-
-        # Verify handler is attached to the internal logger
-        assert len(logger_instance.otel_bridge_logger.handlers) > 0
-        assert isinstance(logger_instance.otel_bridge_logger.handlers[0], logging.Handler)
-
-
 def test_register_sink_and_execution(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """
     Test that registered sinks are called with the correct payload
@@ -338,9 +325,10 @@ def test_sink_exception_suppression(mock_exporters: None, mock_tracer: MagicMock
     mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
     # Should raise exception (Fail Closed)
-    with pytest.raises(RuntimeError, match="Sink exploded"):
-        with logger.start_governed_span("test-sink-failure", attributes):
-            pass
+    with patch("coreason_veritas.auditor.logger"):
+        with pytest.raises(RuntimeError, match="Sink exploded"):
+            with logger.start_governed_span("test-sink-failure", attributes):
+                pass
 
     # Loguru should have logged the error (we could mock loguru but ensuring no crash is main goal)
 
@@ -354,45 +342,22 @@ def test_ier_logger_reinitialization_warning(caplog: Any) -> None:
     with (
         patch("coreason_veritas.auditor.trace.set_tracer_provider"),
         patch("coreason_veritas.auditor._logs.set_logger_provider"),
+        patch("coreason_veritas.auditor.configure_logging"),
+        patch("coreason_veritas.auditor.logger") as mock_logger,
     ):
         # First init
         logger1 = IERLogger(service_name="service-1")
         assert logger1._service_name == "service-1"
 
         # Second init with same name - no warning
-        with caplog.at_level(logging.WARNING):
-            IERLogger(service_name="service-1")
-        assert not caplog.records
+        IERLogger(service_name="service-1")
+        # Ensure warning was not called
+        assert mock_logger.warning.call_count == 0
 
         # Third init with different name - should warn
-        with caplog.at_level(logging.WARNING):
-            # We need to capture loguru logs. Loguru intercepts standard logging,
-            # but caplog captures standard logging.
-            # Since IERLogger uses loguru directly for this warning, we need to make sure
-            # loguru propagates to standard logging or check loguru's sink.
-            # However, looking at the code, it uses `loguru_logger.warning`.
-
-            # Let's use a simpler approach: mock loguru logger
-            with patch("coreason_veritas.auditor.loguru_logger") as mock_logger:
-                IERLogger(service_name="service-2")
-                mock_logger.warning.assert_called_once()
-                assert "Ignoring new service_name='service-2'" in mock_logger.warning.call_args[0][0]
-
-
-def test_ier_logger_reinitialization_warning_real(
-    mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock
-) -> None:
-    """Duplicate test to force coverage of warning line without mocking loguru."""
-    IERLogger._instance = None
-    IERLogger._initialized = False
-
-    with (
-        patch("coreason_veritas.auditor.trace.set_tracer_provider"),
-        patch("coreason_veritas.auditor._logs.set_logger_provider"),
-    ):
-        IERLogger("s1")
-        # Ensure we trigger the warning line with real execution
-        IERLogger("s2")
+        IERLogger(service_name="service-2")
+        mock_logger.warning.assert_called_once()
+        assert "Ignoring new service_name='service-2'" in mock_logger.warning.call_args[0][0]
 
 
 def test_ier_logger_production_mode_instantiation(
@@ -409,6 +374,7 @@ def test_ier_logger_production_mode_instantiation(
             patch("coreason_veritas.auditor.OTLPLogExporter") as mock_log_exporter,
             patch("coreason_veritas.auditor.BatchSpanProcessor") as mock_bsp,
             patch("coreason_veritas.auditor.BatchLogRecordProcessor") as mock_blrp,
+            patch("coreason_veritas.auditor.configure_logging"),
         ):
             # Reset singleton to force re-init
             IERLogger._instance = None
