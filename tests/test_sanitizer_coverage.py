@@ -1,11 +1,10 @@
-
-from unittest.mock import MagicMock
 from typing import Any, Dict, List
+from unittest.mock import MagicMock
 
 import pytest
 
 import coreason_veritas.sanitizer
-from coreason_veritas.sanitizer import scrub_pii_recursive, scrub_pii_payload
+from coreason_veritas.sanitizer import scrub_pii_payload, scrub_pii_recursive
 
 
 def test_circular_reference_dict() -> None:
@@ -93,7 +92,7 @@ def test_scrub_pii_payload_value_error_too_large() -> None:
     original_cls = coreason_veritas.sanitizer.PIIAnalyzer
 
     MockPIIAnalyzer = MagicMock()
-    coreason_veritas.sanitizer.PIIAnalyzer = MockPIIAnalyzer
+    coreason_veritas.sanitizer.PIIAnalyzer = MockPIIAnalyzer  # type: ignore
 
     try:
         # Configure mock chain to raise ValueError
@@ -104,7 +103,7 @@ def test_scrub_pii_payload_value_error_too_large() -> None:
         result = scrub_pii_payload("A very large string")
         assert result == "<REDACTED: PAYLOAD TOO LARGE FOR PII ANALYSIS>"
     finally:
-        coreason_veritas.sanitizer.PIIAnalyzer = original_cls
+        coreason_veritas.sanitizer.PIIAnalyzer = original_cls  # type: ignore
 
 
 def test_scrub_pii_payload_unexpected_error() -> None:
@@ -112,7 +111,7 @@ def test_scrub_pii_payload_unexpected_error() -> None:
     original_cls = coreason_veritas.sanitizer.PIIAnalyzer
 
     MockPIIAnalyzer = MagicMock()
-    coreason_veritas.sanitizer.PIIAnalyzer = MockPIIAnalyzer
+    coreason_veritas.sanitizer.PIIAnalyzer = MockPIIAnalyzer  # type: ignore
 
     try:
         # Configure mock chain to raise generic Exception
@@ -123,4 +122,4 @@ def test_scrub_pii_payload_unexpected_error() -> None:
         with pytest.raises(Exception, match="Boom"):
             scrub_pii_payload("test")
     finally:
-        coreason_veritas.sanitizer.PIIAnalyzer = original_cls
+        coreason_veritas.sanitizer.PIIAnalyzer = original_cls  # type: ignore
