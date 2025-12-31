@@ -113,6 +113,7 @@ def scrub_pii_payload(text: str | None) -> str | None:
 def scrub_pii_recursive(data: Any) -> Any:
     """
     Recursively scrub PII from data structures (dict, list) using an iterative stack-based approach.
+    Tracks visited objects to handle circular references.
     """
     if isinstance(data, str):
         return scrub_pii_payload(data)
@@ -120,17 +121,21 @@ def scrub_pii_recursive(data: Any) -> Any:
     if not isinstance(data, (dict, list, tuple)):
         return data
 
-    # Iterative stack-based approach to avoid RecursionError
+    # Memoization for cycle detection
+    # Maps id(source_obj) -> new_obj
+    memo = {}
+
+    # Helper to create shallow copy
+    def _shallow_copy(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return obj.copy()
+        if isinstance(obj, tuple):
+            return list(obj)
+        return obj[:]
 
     root_is_tuple = isinstance(data, tuple)
-
-    new_data: Any
-    if isinstance(data, dict):
-        new_data = data.copy()
-    elif isinstance(data, tuple):
-        new_data = list(data)
-    else:  # list
-        new_data = data[:]
+    new_data = _shallow_copy(data)
+    memo[id(data)] = new_data
 
     # Stack contains (target_container, source_container)
     stack = [(new_data, data)]
@@ -150,17 +155,14 @@ def scrub_pii_recursive(data: Any) -> Any:
             if isinstance(v, str):
                 target[k] = scrub_pii_payload(v)
             elif isinstance(v, (dict, list, tuple)):
-                # Create new container
-                new_sub: Any
-                if isinstance(v, dict):
-                    new_sub = v.copy()
-                elif isinstance(v, tuple):
-                    new_sub = list(v)
+                # Check cycle
+                if id(v) in memo:
+                    target[k] = memo[id(v)]
                 else:
-                    new_sub = v[:]
-
-                target[k] = new_sub
-                stack.append((new_sub, v))
+                    new_sub = _shallow_copy(v)
+                    memo[id(v)] = new_sub
+                    target[k] = new_sub
+                    stack.append((new_sub, v))
             else:
                 target[k] = v
 
