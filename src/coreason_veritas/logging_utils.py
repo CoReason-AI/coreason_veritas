@@ -15,8 +15,8 @@ from types import FrameType
 from typing import Any, Dict, Optional
 
 from loguru import logger
-from opentelemetry import _logs, trace
-from opentelemetry._logs.severity import SeverityNumber
+from opentelemetry import trace
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 
 # Sensitive keys to redact
 SENSITIVE_KEYS = {
@@ -98,80 +98,7 @@ def scrub_sensitive_data(
         else:
             return data
     finally:
-        # Clean up seen if we are exiting the root call?
-        # No, 'seen' is passed down. We don't remove from 'seen' on the way up
-        # because we want to catch references to parents (cycles).
-        # We don't need to manually clean up.
         pass
-
-
-class OTelLogSink:
-    """
-    A Loguru sink that forwards log records to OpenTelemetry.
-    """
-
-    def __init__(self, service_name: str = "coreason-veritas") -> None:
-        self.service_name = service_name
-        self._logger: Any = None
-
-    @property
-    def otel_logger(self) -> Any:
-        if self._logger is None:
-            provider = _logs.get_logger_provider()
-            self._logger = provider.get_logger(self.service_name)
-        return self._logger
-
-    def __call__(self, message: Any) -> None:
-        """
-        Loguru sink callback.
-        """
-        record = message.record
-
-        # Map Loguru levels to OTel SeverityNumber
-        # Trace=1, Debug=5, Info=9, Warn=13, Error=17, Fatal=21
-        level_no = record["level"].no
-        if level_no < 20:  # Trace(5), Debug(10) -> DEBUG
-            severity_number = SeverityNumber.DEBUG
-        elif level_no < 30:  # Info (20) / Success (25)
-            severity_number = SeverityNumber.INFO
-        elif level_no < 40:  # Warning (30)
-            severity_number = SeverityNumber.WARN
-        elif level_no < 50:  # Error (40)
-            severity_number = SeverityNumber.ERROR
-        else:  # Critical (50)
-            severity_number = SeverityNumber.FATAL
-
-        # Construct attributes
-        attributes = {
-            "log.file.name": record["file"].name,
-            "log.file.path": record["file"].path,
-            "log.line": record["line"],
-            "log.function": record["function"],
-            "log.module": record["module"],
-        }
-
-        # Merge extra attributes
-        extra = record["extra"]
-        for k, v in extra.items():
-            if k in ["trace_id", "span_id"]:
-                # We skip manual trace_id/span_id injection into attributes if we rely on OTel context,
-                # but sticking them in attributes doesn't hurt.
-                continue
-            if isinstance(v, (str, bool, int, float)):
-                attributes[str(k)] = v
-            else:
-                attributes[str(k)] = str(v)
-
-        timestamp_ns = int(record["time"].timestamp() * 1e9)
-
-        # Emit the log record using kwargs
-        self.otel_logger.emit(
-            body=record["message"],
-            severity_number=severity_number,
-            severity_text=record["level"].name,
-            timestamp=timestamp_ns,
-            attributes=attributes,
-        )
 
 
 def _trace_context_patcher(record: Dict[str, Any]) -> None:
@@ -213,14 +140,17 @@ class InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
-def configure_logging() -> None:
+def configure_logging(logger_provider: Optional[LoggerProvider] = None) -> None:
     """
     Configures Loguru with:
     1. Console sink (Text or JSON)
     2. File sink (JSON with Rotation)
-    3. OpenTelemetry sink
+    3. OpenTelemetry sink (Standard LoggingHandler)
     4. Context propagation patcher
     5. Standard library logging interception
+
+    Args:
+        logger_provider: Optional OTel LoggerProvider.
     """
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     log_format = os.environ.get("LOG_FORMAT", "TEXT").upper()
@@ -246,8 +176,11 @@ def configure_logging() -> None:
     logger.add("logs/app.log", rotation="500 MB", retention="10 days", serialize=True, enqueue=True, level=log_level)
 
     # 3. OpenTelemetry Sink
-    otel_sink = OTelLogSink()
-    logger.add(otel_sink, level=log_level)
+    # Use standard LoggingHandler which bridges standard logging records to OTel
+    if logger_provider:
+        otel_handler = LoggingHandler(logger_provider=logger_provider, level=logging.NOTSET)
+        # Add as a sink to Loguru
+        logger.add(otel_handler, level=log_level)
 
     # 4. Patcher
     logger.configure(patcher=_trace_context_patcher)

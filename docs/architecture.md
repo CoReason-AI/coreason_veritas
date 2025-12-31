@@ -15,7 +15,7 @@ The system operates on a "Sandwich" model (Governed -> Ungoverned -> Governed) t
 ### 1. The Gatekeeper (Cryptographic Verification)
 
 *   **Role:** Prevents unauthorized code execution.
-*   **Mechanism:** It validates the input "Asset" (Agent Spec) against a digital signature provided by the Scientific Review Board (SRB).
+*   **Mechanism:** It validates the input "Asset" (Agent Spec) against a digital signature (JWS token) provided by the Scientific Review Board (SRB).
 *   **Failure Mode:** If the signature is invalid, it raises `AssetTamperedError` immediately. No code runs.
 
 ### 2. The Auditor (Immutable Execution Record)

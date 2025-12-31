@@ -22,6 +22,7 @@ from starlette.background import BackgroundTask
 
 import coreason_veritas
 from coreason_veritas.anchor import DeterminismInterceptor
+from coreason_veritas.proxy import ProxyService
 
 
 @asynccontextmanager
@@ -50,29 +51,29 @@ async def governed_inference(request: Request) -> StreamingResponse:
     Gateway Proxy endpoint that enforces determinism and forwards requests to the LLM provider.
     Supports streaming responses.
     """
-    # 1. Parse Request
+    # 1. Parse Request (Non-destructive read for body inspection)
+    # Note: request.json() consumes the stream. To proxy the modified body, we need to rebuild the request?
+    # ProxyService.forward_request takes the original request body.
+    # But we want to send the *governed* body.
+
+    # We need to construct a new request with the governed body, or pass the governed body to the proxy service.
+    # The current ProxyService implementation reads `request.body()`.
+    # But we modified the body via DeterminismInterceptor.
+
     raw_body = await request.json()
-    headers = dict(request.headers)
 
     # 2. Anchor Check: Enforce Determinism
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
     # 3. Proxy: Forward to LLM Provider
-    # We only forward essential headers like Authorization
-    proxy_headers = {}
-    if "authorization" in headers:
-        proxy_headers["Authorization"] = headers["authorization"]
-
     client: httpx.AsyncClient = request.app.state.http_client
+    proxy_service = ProxyService()
 
-    req = client.build_request("POST", LLM_PROVIDER_URL, json=governed_body, headers=proxy_headers, timeout=60.0)
-    r = await client.send(req, stream=True)
-
-    return StreamingResponse(
-        r.aiter_bytes(),
-        status_code=r.status_code,
-        media_type=r.headers.get("content-type"),
-        background=BackgroundTask(r.aclose),
+    return await proxy_service.forward_request(
+        request=request,
+        client=client,
+        target_url=LLM_PROVIDER_URL,
+        json_body=governed_body,
     )
 
 

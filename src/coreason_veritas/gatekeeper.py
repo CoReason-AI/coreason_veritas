@@ -12,10 +12,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-import jcs
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+import jwt
+from cryptography.hazmat.primitives import serialization
 from loguru import logger
 
 from coreason_veritas.exceptions import AssetTamperedError
@@ -45,11 +43,11 @@ class SignatureValidator:
 
     def verify_asset(self, asset_payload: Dict[str, Any], signature: str, check_timestamp: bool = True) -> bool:
         """
-        Verifies the `x-coreason-sig` header against the payload hash.
+        Verifies the JWS signature and ensures the payload matches.
 
         Args:
-            asset_payload: The JSON payload to verify.
-            signature: The hex-encoded signature string.
+            asset_payload: The expected JSON payload.
+            signature: The JWS string.
             check_timestamp: Whether to enforce timestamp/replay protection. Defaults to True.
 
         Returns:
@@ -59,16 +57,25 @@ class SignatureValidator:
             AssetTamperedError: If verification fails.
         """
         try:
-            # 1. Replay Protection Check
+            # 1. Decode and Verify JWS
+            # We use the public key object loaded in __init__
+            decoded_payload = jwt.decode(signature, self._public_key, algorithms=["RS256"])
+
+            # 2. Payload Integrity Check
+            # The payload inside the JWS must match the provided asset_payload
+            if decoded_payload != asset_payload:
+                raise ValueError("Payload mismatch: JWS content does not match provided asset.")
+
+            # 3. Replay Protection Check
             if check_timestamp:
-                timestamp_str = asset_payload.get("timestamp")
+                timestamp_str = decoded_payload.get("timestamp")
                 if not timestamp_str:
                     raise ValueError("Missing 'timestamp' in payload")
 
                 try:
                     # ISO 8601 format expected
                     ts = datetime.fromisoformat(str(timestamp_str))
-                    # Ensure timezone awareness (assuming UTC if not provided, or reject naive?)
+                    # Ensure timezone awareness
                     if ts.tzinfo is None:
                         ts = ts.replace(tzinfo=timezone.utc)
                 except ValueError as e:
@@ -79,24 +86,9 @@ class SignatureValidator:
                 if abs((now - ts).total_seconds()) > 300:
                     raise ValueError(f"Timestamp out of bounds (Replay Attack?): {ts} vs {now}")
 
-            # 2. Cryptographic Verification
-            # Use pre-loaded public key
-            public_key = self._public_key
-
-            # Canonicalize the asset_payload (JSON) to ensure consistent hashing
-            canonical_payload = jcs.canonicalize(asset_payload)
-
-            # Verify the signature
-            # The spec example uses PSS padding with MGF1 and SHA256
-            public_key.verify(
-                bytes.fromhex(signature),
-                canonical_payload,
-                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
-                hashes.SHA256(),
-            )
             logger.info("Asset verification successful.")
             return True
 
-        except (ValueError, TypeError, InvalidSignature, json.JSONDecodeError) as e:
+        except (ValueError, TypeError, jwt.PyJWTError, json.JSONDecodeError) as e:
             logger.error(f"Asset verification failed: {e}")
             raise AssetTamperedError(f"Signature verification failed: {e}") from e

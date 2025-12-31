@@ -11,10 +11,10 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Tuple
 
-import jcs
+import jwt
 import pytest
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.exceptions import AssetTamperedError
@@ -38,14 +38,10 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
-    """Helper to sign a payload."""
-    canonical_payload = jcs.canonicalize(payload)
-    signature = private_key.sign(
-        canonical_payload,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
-        hashes.SHA256(),
-    )
-    return str(signature.hex())
+    """Helper to sign a payload using JWS (PyJWT)."""
+    # PyJWT expects the key as bytes in PEM format or an object.
+    # We can pass the private_key object directly.
+    return jwt.encode(payload, private_key, algorithm="RS256")
 
 
 def test_verify_asset_success(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -71,6 +67,7 @@ def test_verify_asset_tampered_payload(key_pair: Tuple[RSAPrivateKey, str]) -> N
     validator = SignatureValidator(public_key_pem)
     with pytest.raises(AssetTamperedError) as excinfo:
         validator.verify_asset(tampered_payload, signature)
+    # The error might be "Signature verification failed" or "Payload mismatch" wrapped in AssetTamperedError
     assert "Signature verification failed" in str(excinfo.value)
 
 
@@ -185,26 +182,14 @@ def test_verify_asset_whitespace_key(key_pair: Tuple[RSAPrivateKey, str]) -> Non
     assert validator.verify_asset(payload, signature) is True
 
 
-def test_verify_asset_malformed_signature_odd_length(key_pair: Tuple[RSAPrivateKey, str]) -> None:
-    """Test verification fails with an odd-length hex signature."""
-    _, public_key_pem = key_pair
-    payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-    validator = SignatureValidator(public_key_pem)
-    # Hex strings must be even length
-    with pytest.raises(AssetTamperedError) as excinfo:
-        validator.verify_asset(payload, "123")
-    assert "Signature verification failed" in str(excinfo.value)
-
-
-def test_verify_asset_malformed_signature_non_hex(key_pair: Tuple[RSAPrivateKey, str]) -> None:
-    """Test verification fails with non-hex characters in signature."""
+def test_verify_asset_malformed_signature(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification fails with a malformed JWS."""
     _, public_key_pem = key_pair
     payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
 
     validator = SignatureValidator(public_key_pem)
     with pytest.raises(AssetTamperedError) as excinfo:
-        validator.verify_asset(payload, "zzzz")
+        validator.verify_asset(payload, "invalid.jws.token")
     assert "Signature verification failed" in str(excinfo.value)
 
 

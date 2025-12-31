@@ -121,7 +121,7 @@ class IERLogger:
             lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
         # Configure Loguru to use OTel Sink
-        configure_logging()
+        configure_logging(logger_provider=lp)
 
         self._sinks: List[Callable[[Dict[str, Any]], None]] = []
         self._initialized = True

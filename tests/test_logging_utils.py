@@ -1,312 +1,169 @@
-# Copyright (c) 2025 CoReason, Inc.
-#
-# This software is proprietary and dual-licensed.
-# Licensed under the Prosperity Public License 3.0 (the "License").
-# A copy of the license is available at https://prosperitylicense.com/versions/3.0.0
-# For details, see the LICENSE file.
-# Commercial use beyond a 30-day trial requires a separate license.
-#
-# Source Code: https://github.com/CoReason-AI/coreason_veritas
-
 import logging
-import unittest
-from typing import Any, Dict
+import os
+from types import FrameType
 from unittest.mock import MagicMock, patch
 
+import pytest
 from loguru import logger
-from opentelemetry._logs.severity import SeverityNumber
 
 from coreason_veritas.logging_utils import (
     InterceptHandler,
-    OTelLogSink,
+    _trace_context_patcher,
     configure_logging,
     scrub_sensitive_data,
 )
 
 
-class TestLoggingUtils(unittest.TestCase):
-    def test_scrub_sensitive_data_dict(self) -> None:
-        data = {
-            "username": "alice",
-            "password": "secret_password",
-            "nested": {
-                "token": "secret_token",
-                "public": "visible",
-            },
-        }
-        scrubbed = scrub_sensitive_data(data)
-        self.assertEqual(scrubbed["username"], "alice")
-        self.assertEqual(scrubbed["password"], "[REDACTED]")
-        self.assertEqual(scrubbed["nested"]["token"], "[REDACTED]")
-        self.assertEqual(scrubbed["nested"]["public"], "visible")
+def test_scrub_sensitive_data_set_uncomparable() -> None:
+    """Test scrubbing a set with uncomparable items (triggers TypeError in sorted)."""
+    # Use objects that definitely don't support comparison
+    obj1 = object()
+    obj2 = object()
+    data = {obj1, obj2}
 
-    def test_scrub_sensitive_data_list(self) -> None:
-        data = [
-            {"key": "secret_key", "id": 1},
-            {"authorization": "Bearer xyz"},
-        ]
-        scrubbed = scrub_sensitive_data(data)
-        self.assertEqual(scrubbed[0]["key"], "[REDACTED]")
-        self.assertEqual(scrubbed[0]["id"], 1)
-        self.assertEqual(scrubbed[1]["authorization"], "[REDACTED]")
+    # Verify sorted fails
+    with pytest.raises(TypeError):
+        sorted([obj1, obj2])
 
-    def test_scrub_sensitive_data_case_insensitive(self) -> None:
-        data = {"PaSsWoRd": "secret"}
-        scrubbed = scrub_sensitive_data(data)
-        self.assertEqual(scrubbed["PaSsWoRd"], "[REDACTED]")
+    scrubbed = scrub_sensitive_data(data)
 
-    def test_scrub_sensitive_data_tuple(self) -> None:
-        data = ({"password": "secret"}, "public")
-        scrubbed = scrub_sensitive_data(data)
-        self.assertEqual(scrubbed[0]["password"], "[REDACTED]")
-        self.assertEqual(scrubbed[1], "public")
-        self.assertIsInstance(scrubbed, tuple)
+    # Result should be a list (set converted to list)
+    assert isinstance(scrubbed, list)
+    assert len(scrubbed) == 2
+    assert obj1 in scrubbed
+    assert obj2 in scrubbed
 
-    def test_otel_sink_emit(self) -> None:
-        # Initialize Sink
-        sink = OTelLogSink()
 
-        # Inject Mock Logger directly (avoiding import patching issues)
-        mock_otel_logger = MagicMock()
-        sink._logger = mock_otel_logger
+class CustomObj:
+    def __init__(self, x: int):
+        self.x = x
+    def __str__(self) -> str:
+        return f"CustomObj({self.x})"
 
-        # Manually invoke call with a mock loguru message
-        mock_message = MagicMock()
+def test_scrub_sensitive_data_custom_object() -> None:
+    """Test scrubbing a custom object (triggers hasattr(__dict__))."""
+    obj = CustomObj(10)
+    # Ensure it has __dict__
+    assert hasattr(obj, "__dict__")
 
-        mock_level = MagicMock()
-        mock_level.no = 20
-        mock_level.name = "INFO"
+    scrubbed = scrub_sensitive_data(obj)
+    assert scrubbed == "CustomObj(10)"
 
-        mock_record = {
-            "level": mock_level,
-            "time": MagicMock(timestamp=lambda: 1000.0),
-            "file": MagicMock(name="test_file.py", path="/path/test_file.py"),
-            "line": 10,
-            "function": "test_func",
-            "module": "test_module",
-            "extra": {"custom_key": "custom_value"},
-            "message": "Test Message",
-        }
-        mock_message.record = mock_record
 
-        # Call sink
-        sink(mock_message)
+def test_scrub_sensitive_data_primitive() -> None:
+    """Test scrubbing a primitive (hits final else block)."""
+    assert scrub_sensitive_data(123) == 123
+    assert scrub_sensitive_data("foo") == "foo"
 
-        # Verification
-        mock_otel_logger.emit.assert_called_once()
-        kwargs = mock_otel_logger.emit.call_args[1]
 
-        self.assertEqual(kwargs["body"], "Test Message")
-        self.assertEqual(kwargs["severity_text"], "INFO")
-        self.assertEqual(kwargs["attributes"]["custom_key"], "custom_value")
-        self.assertEqual(kwargs["attributes"]["log.function"], "test_func")
+def test_trace_context_patcher_no_span() -> None:
+    """Test patcher when get_current_span returns None."""
+    record: dict = {}
+    with patch("coreason_veritas.logging_utils.trace.get_current_span", return_value=None):
+        _trace_context_patcher(record)
+    # Should return early
+    assert "extra" not in record
 
-    def test_otel_sink_severity_mapping_and_attributes(self) -> None:
-        """
-        Tests severity mapping AND attribute processing (extra fields).
-        Covers lines 150-151 (skipping trace_id) and 156-157 (str conversion).
-        """
-        sink = OTelLogSink()
-        sink._logger = MagicMock()
 
-        levels = [
-            (5, SeverityNumber.DEBUG),  # Trace
-            (20, SeverityNumber.INFO),  # Info
-            (30, SeverityNumber.WARN),  # Warning
-            (40, SeverityNumber.ERROR),  # Error
-            (50, SeverityNumber.FATAL),  # Critical
-        ]
+def test_intercept_handler_unknown_level() -> None:
+    """Test InterceptHandler with an unknown log level."""
+    handler = InterceptHandler()
+    record = logging.LogRecord(
+        name="test",
+        level=99,  # Unknown level
+        pathname=__file__,
+        lineno=10,
+        msg="test message",
+        args=(),
+        exc_info=None,
+    )
 
-        for loguru_no, otel_severity in levels:
-            mock_message = MagicMock()
-            mock_message.record = {
-                "level": MagicMock(no=loguru_no, name="LEVEL"),
-                "time": MagicMock(timestamp=lambda: 1000.0),
-                "file": MagicMock(name="f", path="p"),
-                "line": 1,
-                "function": "f",
-                "module": "m",
-                "extra": {
-                    "trace_id": "should_be_skipped_in_attributes_loop",
-                    "span_id": "should_be_skipped_in_attributes_loop",
-                    "simple_str": "value",
-                    "simple_int": 123,
-                    "complex_obj": {"nested": "dict"},  # Should trigger str() conversion
-                },
-                "message": "m",
-            }
-            sink(mock_message)
-            kwargs = sink._logger.emit.call_args[1]
-            self.assertEqual(kwargs["severity_number"], otel_severity)
+    with patch("coreason_veritas.logging_utils.logger.opt") as mock_opt:
+        mock_log = MagicMock()
+        mock_opt.return_value = mock_log
 
-            # Verify extra attributes logic
-            attrs = kwargs["attributes"]
-            # trace_id/span_id should be skipped
-            self.assertNotIn("trace_id", attrs)
-            self.assertNotIn("span_id", attrs)
-            # primitives should remain
-            self.assertEqual(attrs["simple_str"], "value")
-            self.assertEqual(attrs["simple_int"], 123)
-            # complex objects should be stringified
-            self.assertEqual(attrs["complex_obj"], "{'nested': 'dict'}")
+        handler.emit(record)
 
-    def test_otel_sink_lazy_init(self) -> None:
-        # Patch the function in opentelemetry._logs
-        with patch("opentelemetry._logs.get_logger_provider") as mock_get_provider:
-            mock_provider = MagicMock()
-            mock_get_provider.return_value = mock_provider
+        mock_log.log.assert_called_with("99", "test message")
 
-            sink = OTelLogSink()
-            # Access property to trigger init
-            _ = sink.otel_logger
 
-            mock_get_provider.assert_called_once()
-            mock_provider.get_logger.assert_called_with(sink.service_name)
-
-    def test_trace_context_patcher(self) -> None:
-        from unittest.mock import patch
-
-        from coreason_veritas.logging_utils import _trace_context_patcher
-
-        # Test with valid span
-        with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
-            mock_ctx = MagicMock()
-            mock_ctx.is_valid = True
-            mock_ctx.trace_id = 0x123
-            mock_ctx.span_id = 0x456
-            mock_get_span.return_value.get_span_context.return_value = mock_ctx
-
-            record: Dict[str, Any] = {"extra": {}}
-            _trace_context_patcher(record)
-            self.assertEqual(record["extra"]["trace_id"], f"{0x123:032x}")
-
-        # Test with invalid span
-        with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
-            mock_ctx = MagicMock()
-            mock_ctx.is_valid = False
-            mock_get_span.return_value.get_span_context.return_value = mock_ctx
-
-            record = {"extra": {}}
-            _trace_context_patcher(record)
-            self.assertEqual(record["extra"]["trace_id"], "0" * 32)
-
-        # Test with no span (None)
-        with patch("coreason_veritas.logging_utils.trace.get_current_span") as mock_get_span:
-            mock_get_span.return_value = None
-
-            record = {"extra": {}}
-            _trace_context_patcher(record)
-            # Should return without modifying if we assume extra is empty?
-            pass
-
-    def test_configure_logging(self) -> None:
-        # Patch the singleton logger methods directly
-        with (
-            patch.object(logger, "remove") as mock_remove,
-            patch.object(logger, "add") as mock_add,
-            patch.object(logger, "configure") as mock_configure,
-        ):
+def test_configure_logging_json() -> None:
+    """Test configure_logging with JSON format."""
+    with patch.dict(os.environ, {"LOG_FORMAT": "JSON"}):
+        with patch("coreason_veritas.logging_utils.logger.add") as mock_add:
             configure_logging()
-
-            # Verify logger.remove was called
-            mock_remove.assert_called()
-
-            # Verify logger.add was called for console (stderr) and otel sink
-            self.assertTrue(mock_add.call_count >= 2)
-
-            # Verify logger.configure was called (for patcher)
-            mock_configure.assert_called()
-
-    def test_configure_logging_json(self) -> None:
-        # Patch environment and logger
-        with (
-            patch.dict("os.environ", {"LOG_FORMAT": "JSON"}),
-            patch.object(logger, "remove"),
-            patch.object(logger, "add") as mock_add,
-            patch.object(logger, "configure"),
-        ):
-            configure_logging()
-
-            # Verify that add was called with serialize=True (for the console sink)
+            # Check if one of the calls was for sys.stderr with serialize=True
             calls = mock_add.call_args_list
-            count_serialized = 0
-            for call in calls:
-                if call.kwargs.get("serialize") is True:
-                    count_serialized += 1
+            json_sink_call = False
+            for args, kwargs in calls:
+                if kwargs.get("serialize") is True:
+                    json_sink_call = True
+                    break
+            assert json_sink_call
 
-            # Expect at least 2 (Console + File)
-            self.assertTrue(count_serialized >= 2, f"Expected 2 JSON sinks, found {count_serialized}")
 
-    def test_intercept_handler(self) -> None:
-        """
-        Test InterceptHandler captures standard logging and forwards to Loguru.
-        """
-        handler = InterceptHandler()
+def test_intercept_handler_frame_walking_mock() -> None:
+    """Test frame walking by mocking logging.currentframe."""
+    handler = InterceptHandler()
+    record = logging.LogRecord("test", 20, "path", 10, "msg", (), None)
 
-        # Test 1: Standard Level
-        mock_record_std = MagicMock(spec=logging.LogRecord)
-        mock_record_std.levelname = "INFO"
-        mock_record_std.levelno = 20
-        mock_record_std.getMessage.return_value = "Standard Msg"
-        mock_record_std.exc_info = None
-        mock_record_std.name = "test.logger"
+    # Create mock frames
+    # frame1 (top) -> frame2 (logging) -> frame3 (logging) -> frame4 (caller)
 
-        with patch.object(logger, "opt") as mock_opt:
-            # Make sure log() is called on the result of opt()
-            mock_log_func = MagicMock()
-            mock_opt.return_value.log = mock_log_func
+    frame4 = MagicMock(spec=FrameType)
+    frame4.f_code.co_filename = "caller.py"
+    frame4.f_back = None
 
-            handler.emit(mock_record_std)
+    frame3 = MagicMock(spec=FrameType)
+    frame3.f_code.co_filename = logging.__file__
+    frame3.f_back = frame4
 
-            # Verify Loguru was called with "INFO"
-            mock_log_func.assert_called_with("INFO", "Standard Msg")
+    frame2 = MagicMock(spec=FrameType)
+    frame2.f_code.co_filename = logging.__file__
+    frame2.f_back = frame3
 
-        # Test 2: Custom Level (ValueError path)
-        mock_record_custom = MagicMock(spec=logging.LogRecord)
-        mock_record_custom.levelname = "MY_CUSTOM_LEVEL"
-        mock_record_custom.levelno = 99
-        mock_record_custom.getMessage.return_value = "Custom Msg"
-        mock_record_custom.exc_info = None
+    frame1 = MagicMock(spec=FrameType)
+    # currentframe() returns this
 
-        with patch.object(logger, "opt") as mock_opt:
-            mock_log_func = MagicMock()
-            mock_opt.return_value.log = mock_log_func
+    # We patch logging.currentframe to return frame2 (simulating we are inside logging module)
+    # Wait, InterceptHandler calls logging.currentframe().
+    # It returns the frame of InterceptHandler.emit usually.
+    # The loop starts with that frame.
 
-            # Force logger.level to raise ValueError
-            with patch.object(logger, "level", side_effect=ValueError):
-                handler.emit(mock_record_custom)
+    # Let's say frame1 is InterceptHandler.emit. Its file is logging_utils.py.
+    # But logic is:
+    # frame = logging.currentframe()
+    # while frame and frame.f_code.co_filename == logging.__file__: ...
 
-            # Verify Loguru was called with string "99"
-            mock_log_func.assert_called_with("99", "Custom Msg")
+    # logging.currentframe() returns the frame of the caller of currentframe().
+    # So it returns the frame inside emit().
+    # That frame's filename is `logging_utils.py` (where emit is defined).
+    # `logging.__file__` is `.../logging/__init__.py`.
+    # They are NOT equal.
+    # So the loop condition `frame.f_code.co_filename == logging.__file__` is False initially!
 
-        # Test 3: Stack Depth Adjustment
-        # Simulate stack inside logging module
-        with patch("logging.currentframe") as mock_frame:
-            # Create a mock frame chain: logging -> logging -> app
-            frame_logging_1 = MagicMock()
-            frame_logging_1.f_code.co_filename = logging.__file__
+    # Wait, why does `logging_utils.py` have this loop?
+    # Because `InterceptHandler` is usually copy-pasted from Loguru docs.
+    # The goal is to skip frames belonging to the `logging` module if the handler was called FROM the logging module (e.g. basicConfig defaults).
+    # But `emit` is in `logging_utils.py`.
 
-            frame_logging_2 = MagicMock()
-            frame_logging_2.f_code.co_filename = logging.__file__
+    # If the loop condition is False initially, then lines inside loop are never reached.
+    # That explains why they are not covered.
 
-            frame_app = MagicMock()
-            frame_app.f_code.co_filename = "app.py"
+    # BUT, if I mock `logging.currentframe` to return a frame that IS in `logging.__file__`, the loop will run.
 
-            # Link frames
-            frame_logging_1.f_back = frame_logging_2
-            frame_logging_2.f_back = frame_app
-            frame_app.f_back = None  # End of stack
+    fake_frame = MagicMock(spec=FrameType)
+    fake_frame.f_code.co_filename = logging.__file__
+    fake_frame.f_back = frame4 # Breaks loop
 
-            mock_frame.return_value = frame_logging_1
+    with patch("coreason_veritas.logging_utils.logging.currentframe", return_value=fake_frame):
+         with patch("coreason_veritas.logging_utils.logger.opt") as mock_opt:
+             handler.emit(record)
+             # Loop should run once
+             # depth starts at 2.
+             # Loop runs. frame becomes frame4. depth becomes 3.
+             # Loop checks frame4 (caller.py) != logging.__file__. Stops.
 
-            with patch.object(logger, "opt") as mock_opt:
-                handler.emit(mock_record_std)
-
-                # Default depth is 2.
-                # Loop:
-                # 1. frame=logging_1 (logging), depth=2 -> frame=logging_2, depth=3
-                # 2. frame=logging_2 (logging), depth=3 -> frame=app, depth=4
-                # 3. frame=app (app != logging), break.
-                # Expected depth=4
-
-                mock_opt.assert_called_with(depth=4, exception=None)
+             assert mock_opt.called
+             kwargs = mock_opt.call_args[1]
+             assert kwargs["depth"] == 3

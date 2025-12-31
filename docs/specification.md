@@ -3,7 +3,7 @@
 **Role:** Governance Middleware (The "Safety Anchor")
 **Context:** GxP Enforcement & Immutable Audit
 **Runtime:** Python 3.11+
-**Dependencies:** `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp`, `fastapi`, `uvicorn`, `httpx`, `pydantic`, `cryptography`
+**Dependencies:** `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp`, `fastapi`, `uvicorn`, `httpx`, `pydantic`, `pyjwt`
 
 ## **1. Design Philosophy**
 
@@ -35,19 +35,18 @@ The package is structured into three primary enforcement modules corresponding t
 
 **Technical Requirements:**
 
-* **Library:** `cryptography`
-* **Algorithm:** SHA256 hashing with RSA-PSS padding (MGF1).
-* **Canonicalization:** Uses **JCS (JSON Canonicalization Scheme - RFC 8785)** to ensure strict, byte-level consistency across platforms.
+* **Standard:** Uses **JWS (JSON Web Signature - RFC 7515)** for secure, compact signing.
+* **Algorithm:** RS256 (RSA Signature with SHA-256).
+* **Key Management:** Requires an RSA Public Key (2048-bit or higher) loaded via environment variables or a secure store.
 * **Replay Protection:** Enforces a mandatory `timestamp` field in the payload with a maximum skew of 5 minutes.
-* **Interface:** Accepts payload (dict) and signature (hex string).
+* **Interface:** Accepts payload (dict) and signature (JWS token).
 * **Failure:** Returns `False` on verification failure (Caller raises 403).
 
 **Key Class:** `SignatureValidator`
 
 ```python
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-import jcs
+import jwt
+from cryptography.hazmat.primitives import serialization
 
 class SignatureValidator:
     def __init__(self, public_key_store: str = None):
@@ -55,10 +54,9 @@ class SignatureValidator:
 
     def verify_asset(self, asset_payload: dict, signature: str) -> bool:
         """
-        1. Checks 'timestamp' for replay protection (max 5m skew).
-        2. Loads PEM public key.
-        3. Canonicalizes asset_payload using jcs.canonicalize().
-        4. Verifies signature against payload hash using padding.PSS.
+        1. Loads PEM public key.
+        2. Decodes and verifies JWS signature using jwt.decode().
+        3. Checks 'timestamp' for replay protection (max 5m skew).
         """
         pass
 
@@ -101,7 +99,7 @@ class DeterminismInterceptor:
 **Technical Requirements:**
 
 * **Protocol:** Must use `OTLPSpanExporter` and `OTLPLogExporter` (Proto over HTTP).
-* **Logging:** Uses `loguru` configured with an OTel sink for unified logging.
+* **Logging:** Uses `opentelemetry.sdk._logs.LoggingHandler` for unified logging.
 * **Initialization:** Must emit a structured Log Record ("Handshake") on startup confirming `co.veritas.version`.
 * **Span Attributes:** The `start_governed_span` method must enforce the following GxP attributes:
 * `co.user_id`: Who initiated the action?
@@ -115,17 +113,16 @@ class DeterminismInterceptor:
 
 ```python
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from loguru import logger
+from logging import Handler
 
 class IERLogger:
     def __init__(self):
         # Configure TracerProvider and LoggerProvider with OTLP exporters
-        # Configure Loguru to use OTel Sink
         pass
 
     def emit_handshake(self, version: str):
-        # Emits INFO log "Veritas Engine Initialized" via loguru
-        logger.bind(co_veritas_version=version).info("Veritas Engine Initialized")
+        # Emits INFO log "Veritas Engine Initialized"
+        pass
 
     def start_governed_span(self, name: str, attributes: dict):
         # Wraps tracer.start_as_current_span
@@ -201,10 +198,9 @@ class DeterminismInterceptor:
 
 2. src/coreason_veritas/gatekeeper.py
 This module acts as the "Supply Chain Security" layer.
-import json
-import jcs
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+
+import jwt
+from cryptography.hazmat.primitives import serialization
 from datetime import datetime, timezone
 
 class SignatureValidator:
@@ -213,26 +209,21 @@ class SignatureValidator:
     def __init__(self, public_key_pem: str = None):
         self.public_key_pem = public_key_pem
 
-    def verify_asset(self, payload: dict, signature_hex: str) -> bool:
-        """Verifies if the asset payload matches the provided SRB signature with replay protection."""
-        if not signature_hex or not self.public_key_pem:
+    def verify_asset(self, payload: dict, signature_token: str) -> bool:
+        """Verifies if the asset payload matches the provided SRB signature (JWS) with replay protection."""
+        if not signature_token or not self.public_key_pem:
             return False
-
-        # Replay Protection (Example simplified)
-        ts_str = payload.get("timestamp")
-        # ... logic to check ts_str against datetime.now() with 5m skew ...
 
         try:
             public_key = serialization.load_pem_public_key(self.public_key_pem.encode())
-            # Use JCS for canonicalization
-            canonical_payload = jcs.canonicalize(payload)
-            public_key.verify(
-                bytes.fromhex(signature_hex),
-                canonical_payload,
-                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
-                hashes.SHA256()
-            )
-            return True
+            # jwt.decode handles verification and expiration/claims
+            decoded_payload = jwt.decode(signature_token, public_key, algorithms=["RS256"])
+
+            # Replay Protection: Check timestamp in decoded payload
+            ts_str = decoded_payload.get("timestamp")
+            # ... logic to check ts_str against datetime.now() with 5m skew ...
+
+            return True # In a real impl, we would also match payload content if it's separate
         except Exception:
             return False
 
@@ -249,14 +240,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from .anchor import DeterminismInterceptor
+from .proxy import ProxyService
 import coreason_veritas
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize Veritas Engine Handshake
     coreason_veritas.initialize()
-
     app.state.http_client = httpx.AsyncClient()
+    app.state.proxy_service = ProxyService()
     yield
     await app.state.http_client.aclose()
 
@@ -272,19 +264,15 @@ async def governed_inference(request: Request):
     # Anchor Check
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
+    proxy_service = request.app.state.proxy_service
     client = request.app.state.http_client
-    # Forward essential headers
-    proxy_headers = {}
-    if "authorization" in headers:
-        proxy_headers["Authorization"] = headers["authorization"]
 
-    req = client.build_request("POST", LLM_PROVIDER_URL, json=governed_body, headers=proxy_headers)
-    r = await client.send(req, stream=True)
-
-    return StreamingResponse(
-        r.aiter_bytes(),
-        status_code=r.status_code,
-        media_type=r.headers.get("content-type")
+    return await proxy_service.forward_request(
+        client=client,
+        method="POST",
+        url=LLM_PROVIDER_URL,
+        headers=headers,
+        content=governed_body
     )
 
 FastAPIInstrumentor.instrument_app(app)
@@ -320,7 +308,7 @@ This module handles the heavy lifting of connecting to the VM Vault. It is desig
 
 import os
 import platform
-from loguru import logger
+import logging
 from opentelemetry import trace, _logs
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -353,12 +341,7 @@ class IERLogger:
         _logs.set_logger_provider(lp)
         lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
-        # Configure Loguru to use OTel Sink (conceptual)
-        # configure_logging()
-
     def emit_handshake(self, version: str):
         """Standardized GxP audit trail for package initialization."""
-        logger.bind(
-            co_veritas_version=version,
-            co_governance_status="active"
-        ).info("Veritas Engine Initialized")
+        # Uses standard logging handler to emit to OTel
+        # ...

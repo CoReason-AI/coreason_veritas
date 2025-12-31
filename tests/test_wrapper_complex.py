@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
-import jcs
+import jwt
 import pytest
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
@@ -26,13 +26,8 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
-    canonical_payload = jcs.canonicalize(payload)
-    signature = private_key.sign(
-        canonical_payload,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
-        hashes.SHA256(),
-    )
-    return str(signature.hex())
+    """Helper to sign a payload using JWS (PyJWT)."""
+    return jwt.encode(payload, private_key, algorithm="RS256")
 
 
 def test_threaded_sync_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -119,7 +114,7 @@ def test_evil_str_attribute(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             def safe_func(spec: Dict[str, Any], sig: str, user: Any) -> str:
                 return "ok"
 
-            with pytest.raises(ValueError, match="I am evil"):
+            with pytest.raises(ValueError, match="Governance Validation Failed"):
                 safe_func(spec=payload, sig=sig, user=Evil())
 
 

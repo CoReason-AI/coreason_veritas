@@ -36,7 +36,7 @@ Every "Governed" span will contain the following attributes. These attributes ar
 | :--- | :--- | :--- |
 | `co.user_id` | The identity of the human or system invoking the agent. | `user_1234` |
 | `co.asset_id` | A unique identifier for the logic being executed. | `spec_clinical_v2` |
-| `co.srb_sig` | The cryptographic signature proving authorization. (Optional in **Draft Mode**) | `a1b2c3d4...` |
+| `co.srb_sig` | The cryptographic signature proving authorization. (Optional in **Draft Mode**) | `eyJ...` (JWS) |
 | `co.determinism_verified` | Boolean confirming "Lobotomy Protocol" status. | `true` |
 
 ### Reading the Traces

@@ -16,12 +16,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from loguru import logger
 from opentelemetry import context, trace
+from pydantic import ValidationError
 
 import coreason_veritas.anchor
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import SignatureValidator
 from coreason_veritas.logging_utils import scrub_sensitive_data
+from coreason_veritas.models import GovernanceRequest
 
 
 def get_public_key_from_store() -> str:
@@ -58,38 +60,50 @@ def _prepare_governance(
     bound.apply_defaults()
     arguments = bound.arguments
 
-    # 1. Gatekeeper Check
-    asset = arguments.get(asset_id_arg)
-    user_id = arguments.get(user_id_arg)
-    signature = arguments.get(signature_arg)
+    # 1. Validation via Pydantic Model
+    raw_asset = arguments.get(asset_id_arg)
+    raw_user_id = arguments.get(user_id_arg)
+    raw_signature = arguments.get(signature_arg)
 
-    if asset is None:
-        raise ValueError(f"Missing asset argument: {asset_id_arg}")
-    if user_id is None:
-        raise ValueError(f"Missing user ID argument: {user_id_arg}")
+    # Validate strictness using Pydantic model
+    # Note: If signature is missing but allow_unsigned is True, we construct model without signature
+    # However, model fields are mandatory? signature is Optional in model.
 
+    try:
+        model = GovernanceRequest(
+            asset_id=raw_asset, # type: ignore
+            user_id=raw_user_id, # type: ignore
+            signature=raw_signature # type: ignore
+        )
+    except ValidationError as e:
+        # Map Pydantic errors to ValueError for consistency with existing tests/callers
+        raise ValueError(f"Governance Validation Failed: {e}") from e
+
+    # 2. Gatekeeper Logic
     attributes = {
-        "asset": str(asset),  # Legacy support from spec example
-        "co.asset_id": str(asset),
-        "co.user_id": str(user_id),
+        "asset": str(model.asset_id),
+        "co.asset_id": str(model.asset_id),
+        "co.user_id": model.user_id,
     }
 
-    # Draft Mode Logic
-    if allow_unsigned and signature is None:
+    if allow_unsigned and model.signature is None:
         # Bypass signature check and inject Draft Mode tag
         attributes["co.compliance_mode"] = "DRAFT"
     else:
-        # Strict Mode (Default)
-        if signature is None:
+        # Strict Mode
+        if model.signature is None:
             raise ValueError(f"Missing signature argument: {signature_arg}")
 
         # Retrieve key from store (Env Var)
         public_key = get_public_key_from_store()
-        SignatureValidator(public_key).verify_asset(asset, signature)
 
-        attributes["co.srb_sig"] = str(signature)
+        # Verify using SecretStr value
+        sig_value = model.signature.get_secret_value()
+        SignatureValidator(public_key).verify_asset(model.asset_id, sig_value)
 
-    # 2. Config Sanitization
+        attributes["co.srb_sig"] = sig_value
+
+    # 3. Config Sanitization
     if config_arg and config_arg in arguments:
         original_config = arguments[config_arg]
         if isinstance(original_config, dict):

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, Generator, Tuple
 from unittest.mock import MagicMock, patch
 
-import jcs
+import jwt
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -34,13 +34,7 @@ def mock_keys() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = jcs.canonicalize(payload)
-    signature = private_key.sign(
-        canonical_payload,
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
-        hashes.SHA256(),
-    )
-    return str(signature.hex())
+    return jwt.encode(payload, private_key, algorithm="RS256")
 
 
 @pytest.fixture  # type: ignore[misc]

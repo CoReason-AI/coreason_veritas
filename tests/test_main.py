@@ -81,8 +81,14 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
     mock_httpx_client.build_request.assert_called_once()
     call_kwargs = mock_httpx_client.build_request.call_args.kwargs
     # If args are positional, check args[1] etc. build_request("POST", url, ...)
-    call_args = mock_httpx_client.build_request.call_args.args
-    assert call_args[0] == "POST"
+    # With ProxyService, we might be calling using keyword args exclusively.
+
+    # Check if 'method' is in kwargs or args
+    if "method" in call_kwargs:
+        assert call_kwargs["method"] == "POST"
+    else:
+        call_args = mock_httpx_client.build_request.call_args.args
+        assert call_args[0] == "POST"
 
     sent_json = call_kwargs["json"]
     sent_headers = call_kwargs["headers"]
@@ -94,7 +100,9 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
     assert sent_json["model"] == "gpt-4"
 
     # Assert Headers
-    assert sent_headers["Authorization"] == "Bearer test-key"
+    # Headers might be lowercased by Starlette/Uvicorn
+    auth_header = sent_headers.get("authorization") or sent_headers.get("Authorization")
+    assert auth_header == "Bearer test-key"
 
 
 def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx_client: AsyncMock) -> None:
@@ -124,8 +132,12 @@ def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx
         client.post("/v1/chat/completions", json={"model": "test"})
 
         # Verify URL passed to build_request
-        args = mock_httpx_client.build_request.call_args.args
-        assert args[1] == custom_url
+        kwargs = mock_httpx_client.build_request.call_args.kwargs
+        if "url" in kwargs:
+             assert kwargs["url"] == custom_url
+        else:
+            args = mock_httpx_client.build_request.call_args.args
+            assert args[1] == custom_url
 
 
 def test_run_server_configuration() -> None:
@@ -163,6 +175,7 @@ def test_governed_inference_missing_auth_header(client: TestClient, mock_httpx_c
     call_kwargs = mock_httpx_client.build_request.call_args.kwargs
     sent_headers = call_kwargs["headers"]
     assert "Authorization" not in sent_headers
+    assert "authorization" not in sent_headers
 
 
 def test_governed_inference_upstream_error(client: TestClient, mock_httpx_client: AsyncMock) -> None:

@@ -21,7 +21,7 @@ def governed_execution(
 **Parameters:**
 
 *   `asset_id_arg` (*str*): The name of the keyword argument in the decorated function that contains the asset or specification.
-*   `signature_arg` (*str*): The name of the keyword argument in the decorated function that contains the cryptographic signature.
+*   `signature_arg` (*str*): The name of the keyword argument in the decorated function that contains the cryptographic signature (JWS token).
 *   `user_id_arg` (*str*): The name of the keyword argument in the decorated function that contains the user ID.
 *   `config_arg` (*Optional[str]*): The name of the keyword argument in the decorated function that contains the configuration dictionary. If provided, the configuration will be sanitized by the Anchor.
 *   `allow_unsigned` (*bool*): If set to `True`, enables **Draft Mode**, which bypasses the cryptographic signature verification. Defaults to `False`.
@@ -44,9 +44,9 @@ def governed_execution(
 Validates the cryptographic chain of custody for Agent Specs and Charters.
 
 **Technical Specifications:**
-*   **Algorithm:** SHA256 hashing with RSA-PSS padding (MGF1).
-*   **Canonicalization:** Uses **JCS (JSON Canonicalization Scheme - RFC 8785)** for strict, platform-independent consistency.
-*   **Replay Protection:** Enforces a mandatory `timestamp` field in the payload to prevent replay attacks (max 5-minute skew).
+*   **Standard:** Uses **JWS (JSON Web Signature - RFC 7515)** for secure, compact signing.
+*   **Algorithm:** RS256 (RSA Signature with SHA-256).
+*   **Key Management:** Requires an RSA Public Key (2048-bit or higher) loaded via environment variables or a secure store.
 
 #### `__init__`
 
@@ -69,7 +69,7 @@ def verify_asset(self, asset_payload: Dict[str, Any], signature: str) -> bool
 **Parameters:**
 
 *   `asset_payload` (*Dict[str, Any]*): The JSON payload (asset/spec) to verify.
-*   `signature` (*str*): The hex-encoded signature string.
+*   `signature` (*str*): The JWS token string.
 
 **Returns:**
 

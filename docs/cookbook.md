@@ -13,7 +13,7 @@ from coreason_veritas import governed_execution
 
 # Your payload and signature (normally loaded from DB/API)
 SPEC = {"task": "summarize", "version": 1}
-SIG = "valid_signature_hex..."
+SIG = "eyJhbGciOiJSUzI1NiIs... (JWS Token)"
 USER = "alice@example.com"
 
 @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
