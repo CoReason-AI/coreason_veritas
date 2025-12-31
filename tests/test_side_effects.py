@@ -23,6 +23,7 @@ from loguru import logger
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.wrapper import governed_execution
+from coreason_veritas.sanitizer import scrub_pii_recursive
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -103,13 +104,14 @@ async def test_nested_governed_execution(key_pair: Tuple[RSAPrivateKey, str]) ->
             # Check Outer Attributes
             # Outer: Called BEFORE anchor scope, so determinism_verified should be "False"
             outer_attrs = outer_call.kwargs["attributes"]
-            assert outer_attrs["co.asset_id"] == str(payload)
+            # Verify asset is sanitized in attributes
+            assert outer_attrs["co.asset_id"] == str(scrub_pii_recursive(payload))
             assert outer_attrs["co.determinism_verified"] == "False"
 
             # Check Inner Attributes
             # Inner: Called INSIDE outer's anchor scope, so determinism_verified should be "True"
             inner_attrs = inner_call.kwargs["attributes"]
-            assert inner_attrs["co.asset_id"] == str(payload)
+            assert inner_attrs["co.asset_id"] == str(scrub_pii_recursive(payload))
             assert inner_attrs["co.determinism_verified"] == "True"
 
 
