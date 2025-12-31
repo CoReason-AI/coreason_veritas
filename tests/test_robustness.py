@@ -100,12 +100,21 @@ def test_auditor_init_tracer_provider_failure() -> None:
         IERLogger.reset()
     else:
         IERLogger._instance = None
-        IERLogger._initialized = False
 
-    with patch("coreason_veritas.auditor.trace.set_tracer_provider", side_effect=Exception("Provider exists")):
-        with patch("loguru.logger.warning") as mock_warning:
+    # We need to ensure that trace.get_tracer_provider() returns a ProxyTracerProvider
+    # so that it attempts to set the provider, otherwise it skips initialization.
+    from opentelemetry.trace import ProxyTracerProvider
+
+    with patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()):
+        with patch("coreason_veritas.auditor.trace.set_tracer_provider", side_effect=Exception("Provider exists")):
+            pass
+
+    logger_provider_mock = patch(
+        "coreason_veritas.auditor._logs.set_logger_provider", side_effect=Exception("Logger Provider exists")
+    )
+    with logger_provider_mock:
+        with patch("coreason_veritas.auditor.logger.warning") as mock_warning:
             _ = IERLogger()
-            # Should catch exception and log warning
             mock_warning.assert_called()
 
 
