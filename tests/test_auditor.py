@@ -63,7 +63,10 @@ def test_initialization(
     mock_exporters: None,
 ) -> None:
     """Test that IERLogger initializes providers and exporters."""
+    from opentelemetry.trace import ProxyTracerProvider
+
     with (
+        patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()),
         patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
     ):
@@ -85,7 +88,10 @@ def test_ier_logger_singleton(
     mock_exporters: None,
 ) -> None:
     """Test that IERLogger is a singleton and initializes only once."""
+    from opentelemetry.trace import ProxyTracerProvider
+
     with (
+        patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()),
         patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
     ):
@@ -100,6 +106,14 @@ def test_ier_logger_singleton(
         mock_set_tp.assert_called_once()
         mock_logger_provider.assert_called_once()
         mock_set_lp.assert_called_once()
+
+
+def test_ier_logger_attributes() -> None:
+    """Test that IERLogger has required attributes."""
+    logger = IERLogger()
+    assert hasattr(logger, "_service_name")
+    assert hasattr(logger, "_sinks")
+    assert hasattr(logger, "tracer")
 
 
 def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
@@ -337,7 +351,6 @@ def test_ier_logger_reinitialization_warning(caplog: Any) -> None:
     """Test that re-initializing IERLogger with different service name logs a warning."""
     # Reset singleton
     IERLogger._instance = None
-    IERLogger._initialized = False
 
     with (
         patch("coreason_veritas.auditor.trace.set_tracer_provider"),
@@ -369,6 +382,10 @@ def test_ier_logger_production_mode_instantiation(
     with patch.dict("os.environ", {"COREASON_VERITAS_TEST_MODE": ""}):
         with (
             patch("coreason_veritas.auditor.trace.set_tracer_provider"),
+            patch(
+                "coreason_veritas.auditor.trace.get_tracer_provider",
+                return_value=MagicMock(spec=["not_proxy"]),
+            ),
             patch("coreason_veritas.auditor._logs.set_logger_provider"),
             patch("coreason_veritas.auditor.OTLPSpanExporter") as mock_span_exporter,
             patch("coreason_veritas.auditor.OTLPLogExporter") as mock_log_exporter,
@@ -377,18 +394,23 @@ def test_ier_logger_production_mode_instantiation(
             patch("coreason_veritas.auditor.configure_logging"),
         ):
             # Reset singleton to force re-init
-            IERLogger._instance = None
-            IERLogger._initialized = False
+            IERLogger.reset()
 
-            IERLogger()
+            from opentelemetry.trace import ProxyTracerProvider
 
-            # Verify real exporters were instantiated
-            mock_span_exporter.assert_called_once()
-            mock_log_exporter.assert_called_once()
+            tracer_provider_mock = patch(
+                "coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()
+            )
+            with tracer_provider_mock:
+                IERLogger()
 
-            # Verify they were passed to processors
-            mock_bsp.assert_called_with(mock_span_exporter.return_value)
-            mock_blrp.assert_called_with(mock_log_exporter.return_value)
+                # Verify real exporters were instantiated
+                mock_span_exporter.assert_called_once()
+                mock_log_exporter.assert_called_once()
+
+                # Verify they were passed to processors
+                mock_bsp.assert_called_with(mock_span_exporter.return_value)
+                mock_blrp.assert_called_with(mock_log_exporter.return_value)
 
 
 def test_start_governed_span_draft_mode(mock_exporters: None, mock_tracer: MagicMock) -> None:

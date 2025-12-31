@@ -31,6 +31,7 @@ from opentelemetry.sdk.trace.export import (
     ConsoleSpanExporter,
     SimpleSpanProcessor,
 )
+from opentelemetry.trace import ProxyTracerProvider
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.logging_utils import configure_logging
@@ -44,87 +45,80 @@ class IERLogger:
     """
 
     _instance: Optional["IERLogger"] = None
-    _initialized: bool = False
+
     _service_name: str
+    _sinks: List[Callable[[Dict[str, Any]], None]]
+    tracer: trace.Tracer
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> "IERLogger":
-        if cls._instance is None:
-            cls._instance = super(IERLogger, cls).__new__(cls)
-        return cls._instance
-
-    def __init__(self, service_name: str = "coreason-veritas"):
-        """
-        Initialize the IERLogger.
-
-        Args:
-            service_name: The name of the service for the tracer.
-                          Defaults to "coreason-veritas" if not provided.
-        """
-        if self._initialized:
-            if getattr(self, "_service_name", None) != service_name:
+    def __new__(cls, service_name: str = "coreason-veritas") -> "IERLogger":
+        if cls._instance is not None:
+            if cls._instance._service_name != service_name:
                 logger.warning(
-                    f"IERLogger already initialized with service_name='{self._service_name}'. "
+                    f"IERLogger already initialized with service_name='{cls._instance._service_name}'. "
                     f"Ignoring new service_name='{service_name}'."
                 )
-            return
+            return cls._instance
 
+        self = super(IERLogger, cls).__new__(cls)
         self._service_name = service_name
+        self._initialize_providers()
+        self._sinks = []
 
-        # 1. Resource Attributes: Generic metadata for client portability
+        cls._instance = self
+        return self
+
+    def __init__(self, service_name: str = "coreason-veritas") -> None:
+        """
+        Initialize the IERLogger.
+        Arguments are handled in __new__, but this is required to prevent
+        TypeError: object.__init__() takes no arguments.
+        """
+        pass
+
+    def _initialize_providers(self) -> None:
+        """Initialize OpenTelemetry providers."""
         resource = Resource.create(
             {
-                "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
+                "service.name": os.environ.get("OTEL_SERVICE_NAME", self._service_name),
                 "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
                 "host.name": platform.node(),
             }
         )
 
-        # 2. Setup Tracing (for AI workflow logic)
-        # Check if a tracer provider is already set to avoid warnings/errors
-        # trace.get_tracer_provider() returns a ProxyTracerProvider if not set
-        # But determining if it's "real" or "proxy" is internal.
-        # We try to set it, but we might get a warning if it's already set.
-        # Ideally, we should check if we can control it.
+        # Tracing Setup
+        # Only set global TracerProvider if it's not already set or is a Proxy
+        if isinstance(trace.get_tracer_provider(), ProxyTracerProvider):
+            tp = TracerProvider(resource=resource)
+            if os.environ.get("COREASON_VERITAS_TEST_MODE"):
+                tp.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+            else:
+                tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 
-        # In a real-world scenario with other libraries setting OTel, we might want to attach to existing.
-        # For now, we attempt to set it if we believe we own it.
-
-        tp = TracerProvider(resource=resource)
-        # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
-
-        if os.environ.get("COREASON_VERITAS_TEST_MODE"):
-            # Use Console Exporter in Test Mode to avoid connection errors
-            # Use SimpleSpanProcessor to ensure synchronous export and avoid race conditions
-            tp.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-        else:
-            tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-
-        try:
-            # This throws a warning if already set, but doesn't crash usually.
-            # However, if we want to be clean, we can catch or check.
             trace.set_tracer_provider(tp)
-        except Exception as e:
-            logger.warning(f"Failed to set tracer provider (might be already set): {e}")
+        else:
+            logger.info("TracerProvider already set. Skipping initialization.")
 
-        # Always get the tracer from the (possibly global) provider
         self.tracer = trace.get_tracer("veritas.audit")
 
-        # 3. Setup Logging (for the Handshake and IER events)
-        lp = LoggerProvider(resource=resource)
-        _logs.set_logger_provider(lp)
+        # Logging Setup
+        # Only set global LoggerProvider if it's not already set (checking logic is similar)
+        # Note: OpenTelemetry Python API doesn't expose a ProxyLoggerProvider directly in the same way for types,
+        # but for now we assume similar behavior or just force set it if we can.
+        # Actually _logs.get_logger_provider() returns a ProxyLoggerProvider if not set.
 
+        # We will attempt to set it.
+        lp = LoggerProvider(resource=resource)
         if os.environ.get("COREASON_VERITAS_TEST_MODE"):
-            # Use Console Exporter in Test Mode
-            # Use SimpleLogRecordProcessor to ensure synchronous export
             lp.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogRecordExporter()))
         else:
             lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
-        # Configure Loguru to use OTel Sink
-        configure_logging()
+        try:
+            _logs.set_logger_provider(lp)
+        except Exception as e:
+            logger.warning(f"Failed to set LoggerProvider (might be already set): {e}")
 
-        self._sinks: List[Callable[[Dict[str, Any]], None]] = []
-        self._initialized = True
+        configure_logging()
 
     @classmethod
     def reset(cls) -> None:
@@ -133,7 +127,6 @@ class IERLogger:
         Note: This does NOT reset the global OpenTelemetry TracerProvider.
         """
         cls._instance = None
-        cls._initialized = False
 
     def register_sink(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """
