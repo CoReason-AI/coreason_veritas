@@ -63,13 +63,19 @@ def __init__(self, public_key_store: str)
 Verifies the cryptographic signature of an asset payload.
 
 ```python
-def verify_asset(self, asset_payload: Dict[str, Any], signature: str) -> bool
+def verify_asset(
+    self,
+    asset_payload: Dict[str, Any],
+    signature: str,
+    check_timestamp: bool = True
+) -> bool
 ```
 
 **Parameters:**
 
 *   `asset_payload` (*Dict[str, Any]*): The JSON payload (asset/spec) to verify.
 *   `signature` (*str*): The hex-encoded signature string.
+*   `check_timestamp` (*bool*): Whether to enforce timestamp/replay protection. Defaults to `True`.
 
 **Returns:**
 
@@ -92,7 +98,8 @@ Acts as a proxy/hook into LLM Client configurations to enforce the "Lobotomy Pro
 Sanitizes a configuration dictionary to enforce deterministic parameters (The "Lobotomy Protocol").
 
 ```python
-def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]
+@staticmethod
+def enforce_config(raw_config: Dict[str, Any]) -> Dict[str, Any]
 ```
 
 **Parameters:**
@@ -115,8 +122,9 @@ def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]
 A context manager that sets the Anchor context variable, marking the execution scope as deterministic.
 
 ```python
+@staticmethod
 @contextlib.contextmanager
-def scope(self) -> Generator[None, None, None]
+def scope() -> Generator[None, None, None]
 ```
 
 **Usage:**
