@@ -8,20 +8,21 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-from unittest.mock import patch
+from typing import Generator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from coreason_veritas.auditor import IERLogger
 
 
-@pytest.fixture
-def mock_logger():
+@pytest.fixture  # type: ignore[misc]
+def mock_logger() -> Generator[MagicMock, None, None]:
     with patch("coreason_veritas.auditor.logger") as mock:
         yield mock
 
 
-def test_log_llm_transaction(mock_logger):
+def test_log_llm_transaction(mock_logger: MagicMock) -> None:
     """
     Test that log_llm_transaction correctly binds attributes and logs the event.
     """
