@@ -16,7 +16,7 @@ import pytest
 from coreason_veritas.auditor import IERLogger
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore[misc]
 def mock_tracer() -> Generator[MagicMock, None, None]:
     """Mock the OpenTelemetry tracer to prevent actual tracing calls."""
     with patch("coreason_veritas.auditor.trace.get_tracer") as mock:
@@ -24,20 +24,20 @@ def mock_tracer() -> Generator[MagicMock, None, None]:
         yield tracer_instance
 
 
-@pytest.fixture
-def mock_logger_bind():
+@pytest.fixture  # type: ignore[misc]
+def mock_logger_bind() -> Generator[MagicMock, None, None]:
     """Mock loguru logger.bind"""
     with patch("coreason_veritas.auditor.logger.bind") as mock:
         yield mock
 
 
-@pytest.fixture
-def ier_logger(mock_tracer):
+@pytest.fixture  # type: ignore[misc]
+def ier_logger(mock_tracer: MagicMock) -> IERLogger:
     IERLogger.reset()
     return IERLogger()
 
 
-def test_log_llm_transaction(ier_logger, mock_logger_bind):
+def test_log_llm_transaction(ier_logger: IERLogger, mock_logger_bind: MagicMock) -> None:
     """Test standard logging of LLM transaction."""
     mock_bound_logger = MagicMock()
     mock_logger_bind.return_value = mock_bound_logger
@@ -50,7 +50,7 @@ def test_log_llm_transaction(ier_logger, mock_logger_bind):
         input_tokens=100,
         output_tokens=50,
         cost_usd=0.002,
-        latency_ms=150,
+        latency_ms=150
     )
 
     # Check that bind was called with correct attributes

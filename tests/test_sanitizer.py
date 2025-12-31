@@ -10,6 +10,8 @@
 
 import importlib
 import sys
+from types import ModuleType
+from typing import Any, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,26 +21,26 @@ SAMPLE_TEXT_CLEAN = "This is a safe string."
 SAMPLE_TEXT_PII = "My email is gowtham@coreason.ai and phone is 555-0199."
 
 
-@pytest.fixture
-def reset_sanitizer_module():
+@pytest.fixture  # type: ignore[misc]
+def reset_sanitizer_module() -> Generator[ModuleType, None, None]:
     """
     Fixture to reload the sanitizer module to ensure fresh state for globals/singletons.
     """
     if "coreason_veritas.sanitizer" in sys.modules:
         importlib.reload(sys.modules["coreason_veritas.sanitizer"])
     else:
-        pass
+        import coreason_veritas.sanitizer
 
     yield sys.modules["coreason_veritas.sanitizer"]
 
 
-@pytest.fixture
-def mock_analyzer_engine():
+@pytest.fixture  # type: ignore[misc]
+def mock_analyzer_engine() -> Generator[MagicMock, None, None]:
     with patch("coreason_veritas.sanitizer.AnalyzerEngine") as mock:
         engine_instance = mock.return_value
 
         # Mock analyze method
-        def analyze_side_effect(text, entities, language):
+        def analyze_side_effect(text: str, entities: Any, language: str) -> list[MagicMock]:
             results = []
             if "gowtham@coreason.ai" in text:
                 # Mock email result
@@ -60,8 +62,8 @@ def mock_analyzer_engine():
         yield mock
 
 
-@pytest.fixture
-def clear_singleton():
+@pytest.fixture  # type: ignore[misc]
+def clear_singleton() -> Generator[None, None, None]:
     """Ensure PIIAnalyzer singleton is cleared before and after test."""
     from coreason_veritas.sanitizer import PIIAnalyzer
 
@@ -72,7 +74,9 @@ def clear_singleton():
     PIIAnalyzer._analyzer = None
 
 
-def test_pii_analyzer_singleton(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_pii_analyzer_singleton(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     sanitizer = reset_sanitizer_module
     PIIAnalyzer = sanitizer.PIIAnalyzer
 
@@ -85,15 +89,19 @@ def test_pii_analyzer_singleton(reset_sanitizer_module, clear_singleton, mock_an
     mock_analyzer_engine.assert_called()
 
 
-def test_scrub_pii_payload_none(reset_sanitizer_module):
+def test_scrub_pii_payload_none(reset_sanitizer_module: ModuleType) -> None:
     assert reset_sanitizer_module.scrub_pii_payload(None) is None
 
 
-def test_scrub_pii_payload_clean(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_scrub_pii_payload_clean(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     assert reset_sanitizer_module.scrub_pii_payload(SAMPLE_TEXT_CLEAN) == SAMPLE_TEXT_CLEAN
 
 
-def test_scrub_pii_payload_with_pii(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_scrub_pii_payload_with_pii(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     sanitizer = reset_sanitizer_module
 
     result = sanitizer.scrub_pii_payload(SAMPLE_TEXT_PII)
@@ -103,7 +111,9 @@ def test_scrub_pii_payload_with_pii(reset_sanitizer_module, clear_singleton, moc
     assert "555-0199" not in result
 
 
-def test_scrub_pii_recursive_dict(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_scrub_pii_recursive_dict(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     sanitizer = reset_sanitizer_module
     data = {"safe": SAMPLE_TEXT_CLEAN, "sensitive": SAMPLE_TEXT_PII, "nested": {"deep_sensitive": SAMPLE_TEXT_PII}}
     result = sanitizer.scrub_pii_recursive(data)
@@ -113,7 +123,9 @@ def test_scrub_pii_recursive_dict(reset_sanitizer_module, clear_singleton, mock_
     assert "<REDACTED EMAIL_ADDRESS>" in result["nested"]["deep_sensitive"]
 
 
-def test_scrub_pii_recursive_list(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_scrub_pii_recursive_list(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     sanitizer = reset_sanitizer_module
     data = [SAMPLE_TEXT_CLEAN, SAMPLE_TEXT_PII, [SAMPLE_TEXT_PII]]
     result = sanitizer.scrub_pii_recursive(data)
@@ -123,7 +135,9 @@ def test_scrub_pii_recursive_list(reset_sanitizer_module, clear_singleton, mock_
     assert "<REDACTED EMAIL_ADDRESS>" in result[2][0]
 
 
-def test_scrub_pii_recursive_tuple(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_scrub_pii_recursive_tuple(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     sanitizer = reset_sanitizer_module
     data = (SAMPLE_TEXT_CLEAN, SAMPLE_TEXT_PII, (SAMPLE_TEXT_PII,))
     result = sanitizer.scrub_pii_recursive(data)
@@ -137,7 +151,7 @@ def test_scrub_pii_recursive_tuple(reset_sanitizer_module, clear_singleton, mock
     assert "<REDACTED EMAIL_ADDRESS>" in result[2][0]
 
 
-def test_scrub_pii_large_payload(reset_sanitizer_module, clear_singleton):
+def test_scrub_pii_large_payload(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     sanitizer = reset_sanitizer_module
     PIIAnalyzer = sanitizer.PIIAnalyzer
 
@@ -150,7 +164,7 @@ def test_scrub_pii_large_payload(reset_sanitizer_module, clear_singleton):
         assert result == "<REDACTED: PAYLOAD TOO LARGE FOR PII ANALYSIS>"
 
 
-def test_scrub_pii_missing_dependency(reset_sanitizer_module, clear_singleton):
+def test_scrub_pii_missing_dependency(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     # We need to simulate _HAS_PRESIDIO = False
     # Since we cannot easily unload presidio, we patch the module attribute
     sanitizer = reset_sanitizer_module
@@ -163,7 +177,7 @@ def test_scrub_pii_missing_dependency(reset_sanitizer_module, clear_singleton):
         assert result == SAMPLE_TEXT_PII
 
 
-def test_scrub_pii_analyzer_init_failure(reset_sanitizer_module, clear_singleton):
+def test_scrub_pii_analyzer_init_failure(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     sanitizer = reset_sanitizer_module
 
     # We patch AnalyzerEngine to raise exception during init
@@ -180,7 +194,7 @@ def test_scrub_pii_analyzer_init_failure(reset_sanitizer_module, clear_singleton
             assert result == "<REDACTED: PII ANALYZER MISSING>"
 
 
-def test_scrub_pii_unexpected_error(reset_sanitizer_module, clear_singleton):
+def test_scrub_pii_unexpected_error(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     sanitizer = reset_sanitizer_module
     PIIAnalyzer = sanitizer.PIIAnalyzer
 
@@ -195,7 +209,9 @@ def test_scrub_pii_unexpected_error(reset_sanitizer_module, clear_singleton):
             sanitizer.scrub_pii_payload("text")
 
 
-def test_scrub_pii_recursive_mixed_types(reset_sanitizer_module, clear_singleton, mock_analyzer_engine):
+def test_scrub_pii_recursive_mixed_types(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
     sanitizer = reset_sanitizer_module
     # Test handling of non-container, non-string types
     data = {"int": 1, "float": 2.5, "bool": True, "none": None}
@@ -203,7 +219,7 @@ def test_scrub_pii_recursive_mixed_types(reset_sanitizer_module, clear_singleton
     assert result == data
 
 
-def test_initialize_fail_open_logging(reset_sanitizer_module, clear_singleton):
+def test_initialize_fail_open_logging(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     """Test that if presidio is missing, we log a warning during init."""
     sanitizer = reset_sanitizer_module
 
@@ -214,7 +230,7 @@ def test_initialize_fail_open_logging(reset_sanitizer_module, clear_singleton):
             mock_logger.warning.assert_called_with("presidio-analyzer not installed. PII scrubbing will be disabled.")
 
 
-def test_initialize_exception_logging(reset_sanitizer_module, clear_singleton):
+def test_initialize_exception_logging(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     """Test that if init raises exception, we log a warning."""
     sanitizer = reset_sanitizer_module
 

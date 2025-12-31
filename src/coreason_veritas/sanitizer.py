@@ -73,9 +73,9 @@ def scrub_pii_payload(text: str | None) -> str | None:
     analyzer = PIIAnalyzer().get_analyzer()
     if analyzer is None:
         if not _HAS_PRESIDIO:
-             # If dependency is missing, we might return original text or error.
-             # API behavior was fail-safe/warning.
-             # Given prompt instructions: "Handle ImportError gracefully (log warning if missing...)"
+            # If dependency is missing, we might return original text or error.
+            # API behavior was fail-safe/warning.
+            # Given prompt instructions: "Handle ImportError gracefully (log warning if missing...)"
             # If called and missing, we'll return text but log.
             return text
         return "<REDACTED: PII ANALYZER MISSING>"
