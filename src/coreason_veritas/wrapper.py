@@ -118,6 +118,7 @@ class GovernanceContext:
         user_id_arg: str,
         config_arg: Optional[str],
         allow_unsigned: bool,
+        anchor_var: Any = None,
     ):
         self.func = func
         self.args = args
@@ -127,6 +128,7 @@ class GovernanceContext:
         self.user_id_arg = user_id_arg
         self.config_arg = config_arg
         self.allow_unsigned = allow_unsigned
+        self.anchor_var = anchor_var or coreason_veritas.anchor._ANCHOR_ACTIVE
 
         self.attributes: Dict[str, str] = {}
         self.bound: Optional[inspect.BoundArguments] = None
@@ -188,13 +190,13 @@ class GovernanceContext:
         self.token_otel = context.attach(ctx)
 
         # Activate Anchor
-        self.token_anchor = coreason_veritas.anchor._ANCHOR_ACTIVE.set(True)
+        self.token_anchor = self.anchor_var.set(True)
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         try:
             if self.token_anchor:
-                coreason_veritas.anchor._ANCHOR_ACTIVE.reset(self.token_anchor)
+                self.anchor_var.reset(self.token_anchor)
         except ValueError:
             pass
 
@@ -242,23 +244,6 @@ def governed_execution(
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def log_start(attributes: Dict[str, str], bound: inspect.BoundArguments) -> None:
-            # Scrub arguments
-            safe_args = scrub_sensitive_data(bound.arguments)
-            logger.bind(**attributes).info(
-                "Governance Execution Started", safe_payload=safe_args, function=func.__name__
-            )
-
-        def log_end(attributes: Dict[str, str], start_time: float, success: bool = True) -> None:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            verdict = "ALLOWED" if success else "BLOCKED"
-            logger.bind(**attributes).info(
-                "Governance Execution Completed",
-                duration_ms=duration_ms,
-                verdict=verdict,
-                function=func.__name__,
-            )
-
         if inspect.isasyncgenfunction(func):
 
             @wraps(func)

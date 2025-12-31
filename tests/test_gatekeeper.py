@@ -231,6 +231,40 @@ def test_verify_asset_replay_old_timestamp(key_pair: Tuple[RSAPrivateKey, str]) 
         validator.verify_asset(payload, signature)
 
 
+def test_verify_asset_malformed_timestamp(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure when timestamp is malformed."""
+    private_key, public_key_pem = key_pair
+    payload = {"agent": "veritas", "timestamp": "invalid-date"}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    with pytest.raises(AssetTamperedError, match="Invalid 'timestamp' format"):
+        validator.verify_asset(payload, signature)
+
+
+def test_verify_asset_naive_timestamp(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test verification with a naive timestamp (should be treated as UTC)."""
+    private_key, public_key_pem = key_pair
+    # Naive timestamp (no Z or offset)
+    naive_ts = datetime.now().isoformat()
+    payload = {"agent": "veritas", "timestamp": naive_ts}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    # This should succeed if timezone is added correctly inside, assuming local time vs UTC handling is robust.
+    # Note: datetime.now() returns local time if not timezone aware.
+    # If the code assumes input is UTC when naive, datetime.now() might be offset.
+    # Safe bet: datetime.utcnow().isoformat() (deprecated but returns naive UTC)
+    # or datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+    # Let's ensure it passes by using a recent naive UTC time.
+    naive_utc = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    payload["timestamp"] = naive_utc
+    signature = sign_payload(payload, private_key)
+
+    assert validator.verify_asset(payload, signature) is True
+
+
 def test_verify_asset_replay_future_timestamp(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test failure when timestamp is too far in future."""
     private_key, public_key_pem = key_pair

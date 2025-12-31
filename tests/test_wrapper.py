@@ -53,6 +53,31 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_missing_key_store_real(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure if key store env var is missing (without mocking the helper)."""
+    private_key, _ = key_pair
+    payload = {"data": "secure", "timestamp": datetime.now(timezone.utc).isoformat()}
+    signature = sign_payload(payload, private_key)
+
+    # Ensure Env Var is missing
+    with patch.dict(os.environ, {}, clear=True):
+        # We need to restore specific env vars if needed, but for this test simple clear might be too aggressive if pytest depends on env?
+        # Better to just pop the key.
+        pass
+
+    with patch.dict(os.environ):
+        if "COREASON_VERITAS_PUBLIC_KEY" in os.environ:
+            del os.environ["COREASON_VERITAS_PUBLIC_KEY"]
+
+        @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+        async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+            return "Should not reach here"
+
+        with pytest.raises(ValueError, match="COREASON_VERITAS_PUBLIC_KEY environment variable is not set"):
+            await protected_function(spec=payload, sig=signature, user="user-123")
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test the full flow of governed execution."""
     private_key, public_key_pem = key_pair
@@ -629,3 +654,56 @@ async def test_governed_execution_asyncgen_exception_handling(key_pair: Tuple[RS
 
             # Verify Span started (using start_span for async generators now)
             mock_tracer.start_span.assert_called_once()
+
+
+def test_governance_context_cleanup_exceptions(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test that exceptions during cleanup (reset/detach) are suppressed using dependency injection."""
+    from coreason_veritas.wrapper import GovernanceContext
+
+    private_key, public_key_pem = key_pair
+    payload = {"data": "cleanup", "timestamp": datetime.now(timezone.utc).isoformat()}
+    signature = sign_payload(payload, private_key)
+
+    # Mock Anchor Variable
+    mock_anchor_var = MagicMock()
+    mock_anchor_var.set.return_value = "mock_token"
+    mock_anchor_var.reset.side_effect = ValueError("Context diverged")
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_span.return_value = MagicMock()
+
+            # Mock IERLogger to avoid interference from other tests or real init
+            with patch("coreason_veritas.wrapper.IERLogger") as mock_logger_cls:
+                mock_logger_cls.return_value.create_governed_span.return_value = mock_tracer.start_span.return_value
+
+                # Mock detach failure
+                with patch("opentelemetry.context.detach", side_effect=RuntimeError("Detach failed")):
+
+                    def dummy_func(spec: Dict[str, Any], sig: str, user: str) -> str:
+                        return "ok"
+
+                    ctx = GovernanceContext(
+                        func=dummy_func,
+                        args=(),
+                        kwargs={"spec": payload, "sig": signature, "user": "cleanup-user"},
+                        asset_id_arg="spec",
+                        signature_arg="sig",
+                        user_id_arg="user",
+                        config_arg=None,
+                        allow_unsigned=False,
+                        anchor_var=mock_anchor_var  # Inject mock
+                    )
+
+                    ctx.prepare()
+
+                    # Run context manager
+                    with ctx:
+                        pass
+
+                    # If we reached here without exception, success.
+
+                    # Verify reset was called
+                    mock_anchor_var.reset.assert_called_with("mock_token")
