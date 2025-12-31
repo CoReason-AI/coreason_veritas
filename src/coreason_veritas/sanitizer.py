@@ -159,8 +159,6 @@ def scrub_pii_recursive(data: Any) -> Any:
             iterator = source.items()
         elif isinstance(source, (list, tuple)):
             iterator = enumerate(source)
-        else:
-            continue
 
         for k, v in iterator:
             if isinstance(v, str):
@@ -171,24 +169,16 @@ def scrub_pii_recursive(data: Any) -> Any:
                     target.append(val)
 
             elif isinstance(v, (dict, list, tuple)):
-                # Check cycle
-                v_id = id(v)
-                if v_id in memo:
-                    # Cycle detected or shared object
-                    val = memo[v_id]
-                    if isinstance(target, dict):
-                        target[k] = val
-                    else:
-                        target.append(val)
-                else:
-                    # Create new container
-                    new_sub, _ = get_or_create_container(v)
-                    if isinstance(target, dict):
-                        target[k] = new_sub
-                    else:
-                        target.append(new_sub)
+                # Use get_or_create_container for everything to consolidate logic
+                val, created = get_or_create_container(v)
 
-                    stack.append((new_sub, v))
+                if isinstance(target, dict):
+                    target[k] = val
+                else:
+                    target.append(val)
+
+                if created:
+                     stack.append((val, v))
             else:
                 # Primitive
                 if isinstance(target, dict):
