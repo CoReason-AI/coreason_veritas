@@ -320,9 +320,7 @@ def test_sink_exception_suppression(mock_exporters: None, mock_tracer: MagicMock
     # Loguru should have logged the error (we could mock loguru but ensuring no crash is main goal)
 
 
-def test_configure_telemetry_production_mode(
-    mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock
-) -> None:
+def test_configure_telemetry_production_mode(mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock) -> None:
     """
     Test that in production mode (TEST_MODE unset), real OTLP exporters are instantiated.
     """
