@@ -6,20 +6,17 @@ import pytest
 from coreason_veritas.exceptions import AssetTamperedError
 from coreason_veritas.wrapper import governed_execution
 
-# Mock keys for testing
-from tests.edge_cases.test_gatekeeper_extra_edge_cases import pem_public, sign_payload
-
 
 # We need to set the environment variable for the public key
 @pytest.fixture(autouse=True)
-def set_public_key_env():
+def set_public_key_env(pem_public):
     os.environ["COREASON_VERITAS_PUBLIC_KEY"] = pem_public
     yield
     if "COREASON_VERITAS_PUBLIC_KEY" in os.environ:
         del os.environ["COREASON_VERITAS_PUBLIC_KEY"]
 
 
-def test_missing_env_var_public_key():
+def test_missing_env_var_public_key(sign_payload_func):
     """Test behavior when COREASON_VERITAS_PUBLIC_KEY is missing."""
     del os.environ["COREASON_VERITAS_PUBLIC_KEY"]
 
@@ -28,7 +25,7 @@ def test_missing_env_var_public_key():
         return True
 
     payload = {"data": "test", "timestamp": datetime.now(timezone.utc).isoformat()}
-    sig = sign_payload(payload)
+    sig = sign_payload_func(payload)
 
     with pytest.raises(ValueError, match="COREASON_VERITAS_PUBLIC_KEY environment variable is not set"):
         my_func(spec=payload, sig=sig, user="test_user")
@@ -46,7 +43,7 @@ def test_governed_execution_missing_arguments_in_call():
         my_func(spec={})
 
 
-def test_governed_execution_incorrect_argument_names():
+def test_governed_execution_incorrect_argument_names(sign_payload_func):
     """Test decorator configured with wrong argument names."""
 
     @governed_execution(asset_id_arg="wrong_spec", signature_arg="sig", user_id_arg="user")
@@ -54,7 +51,7 @@ def test_governed_execution_incorrect_argument_names():
         return True
 
     payload = {"data": "test", "timestamp": datetime.now(timezone.utc).isoformat()}
-    sig = sign_payload(payload)
+    sig = sign_payload_func(payload)
 
     # The wrapper tries to find "wrong_spec" in arguments but it won't be there.
     # The code `asset = arguments.get(asset_id_arg)` will return None.
@@ -64,7 +61,7 @@ def test_governed_execution_incorrect_argument_names():
         my_func(spec=payload, sig=sig, user="test_user")
 
 
-def test_governed_execution_class_method():
+def test_governed_execution_class_method(sign_payload_func):
     """Test usage on a class method."""
 
     class processor:
@@ -74,12 +71,12 @@ def test_governed_execution_class_method():
 
     p = processor()
     payload = {"data": "test", "timestamp": datetime.now(timezone.utc).isoformat()}
-    sig = sign_payload(payload)
+    sig = sign_payload_func(payload)
 
     assert p.process(spec=payload, sig=sig, user="user") == "processed"
 
 
-def test_governed_execution_exception_propagation():
+def test_governed_execution_exception_propagation(sign_payload_func):
     """Test that exceptions inside the function are propagated."""
 
     @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
@@ -87,7 +84,7 @@ def test_governed_execution_exception_propagation():
         raise RuntimeError("Something went wrong")
 
     payload = {"data": "test", "timestamp": datetime.now(timezone.utc).isoformat()}
-    sig = sign_payload(payload)
+    sig = sign_payload_func(payload)
 
     with pytest.raises(RuntimeError, match="Something went wrong"):
         failing_func(spec=payload, sig=sig, user="user")
