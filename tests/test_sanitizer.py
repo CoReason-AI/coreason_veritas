@@ -29,7 +29,7 @@ def reset_sanitizer_module() -> Generator[ModuleType, None, None]:
     if "coreason_veritas.sanitizer" in sys.modules:
         importlib.reload(sys.modules["coreason_veritas.sanitizer"])
     else:
-        import coreason_veritas.sanitizer
+        importlib.import_module("coreason_veritas.sanitizer")
 
     yield sys.modules["coreason_veritas.sanitizer"]
 

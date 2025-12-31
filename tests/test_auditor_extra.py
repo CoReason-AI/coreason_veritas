@@ -50,7 +50,7 @@ def test_log_llm_transaction(ier_logger: IERLogger, mock_logger_bind: MagicMock)
         input_tokens=100,
         output_tokens=50,
         cost_usd=0.002,
-        latency_ms=150
+        latency_ms=150,
     )
 
     # Check that bind was called with correct attributes
