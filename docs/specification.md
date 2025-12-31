@@ -53,7 +53,7 @@ class SignatureValidator:
     def __init__(self, public_key_store: str = None):
         self.public_key_store = public_key_store
 
-    def verify_asset(self, asset_payload: dict, signature: str) -> bool:
+    def verify_asset(self, asset_payload: dict, signature: str, check_timestamp: bool = True) -> bool:
         """
         1. Checks 'timestamp' for replay protection (max 5m skew).
         2. Loads PEM public key.
@@ -213,14 +213,15 @@ class SignatureValidator:
     def __init__(self, public_key_pem: str = None):
         self.public_key_pem = public_key_pem
 
-    def verify_asset(self, payload: dict, signature_hex: str) -> bool:
+    def verify_asset(self, payload: dict, signature_hex: str, check_timestamp: bool = True) -> bool:
         """Verifies if the asset payload matches the provided SRB signature with replay protection."""
         if not signature_hex or not self.public_key_pem:
             return False
 
         # Replay Protection (Example simplified)
-        ts_str = payload.get("timestamp")
-        # ... logic to check ts_str against datetime.now() with 5m skew ...
+        if check_timestamp:
+            ts_str = payload.get("timestamp")
+            # ... logic to check ts_str against datetime.now() with 5m skew ...
 
         try:
             public_key = serialization.load_pem_public_key(self.public_key_pem.encode())
