@@ -21,7 +21,11 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import _prepare_governance, get_public_key_from_store, governed_execution
+from coreason_veritas.wrapper import (
+    GovernanceContext,
+    get_public_key_from_store,
+    governed_execution,
+)
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -440,7 +444,7 @@ async def test_governed_execution_strict_mode_enforced(key_pair: Tuple[RSAPrivat
 
 
 def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
-    """Test the helper function independently."""
+    """Test the GovernanceContext logic independently."""
     private_key, public_key_pem = key_pair
 
     # Mock func signature
@@ -459,7 +463,7 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         get_public_key_from_store.cache_clear()
 
-        attributes, bound = _prepare_governance(
+        ctx = GovernanceContext(
             func=mock_func,
             args=args,
             kwargs=kwargs,
@@ -470,14 +474,17 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             allow_unsigned=False,
         )
 
+        ctx._prepare_governance()
+
         # Verify attributes
-        assert attributes["co.asset_id"] == str(asset)
-        assert attributes["co.user_id"] == user_val
-        assert attributes["co.srb_sig"] == sig_val
+        assert ctx.attributes["co.asset_id"] == str(asset)
+        assert ctx.attributes["co.user_id"] == user_val
+        assert ctx.attributes["co.srb_sig"] == sig_val
 
         # Verify bound arguments
-        assert bound.arguments["a"] == 1
-        assert bound.arguments["asset"] == asset
+        assert ctx.bound_args is not None
+        assert ctx.bound_args.arguments["a"] == 1
+        assert ctx.bound_args.arguments["asset"] == asset
 
 
 def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -498,7 +505,7 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         get_public_key_from_store.cache_clear()
 
-        attributes, bound = _prepare_governance(
+        ctx = GovernanceContext(
             func=mock_func,
             args=args,
             kwargs=kwargs,
@@ -509,8 +516,11 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
             allow_unsigned=False,
         )
 
-        assert attributes["co.asset_id"] == str(asset)
-        assert bound.arguments["asset"] == asset
+        ctx._prepare_governance()
+
+        assert ctx.attributes["co.asset_id"] == str(asset)
+        assert ctx.bound_args is not None
+        assert ctx.bound_args.arguments["asset"] == asset
 
 
 def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -527,7 +537,7 @@ def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) ->
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         get_public_key_from_store.cache_clear()
 
-        attributes, bound = _prepare_governance(
+        ctx = GovernanceContext(
             func=mock_func,
             args=(),
             kwargs={"config": risky_config, "asset": asset, "sig": sig_val, "user": "u"},
@@ -538,7 +548,10 @@ def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) ->
             allow_unsigned=False,
         )
 
-        sanitized = bound.arguments["config"]
+        ctx._prepare_governance()
+
+        assert ctx.bound_args is not None
+        sanitized = ctx.bound_args.arguments["config"]
         assert sanitized["temperature"] == 0.0
         assert sanitized["seed"] == 42
 

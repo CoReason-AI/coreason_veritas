@@ -36,6 +36,48 @@ from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.logging_utils import configure_logging
 
 
+def configure_telemetry(service_name: str = "coreason-veritas") -> None:
+    """
+    Configures global OpenTelemetry providers (Tracer and Logger).
+    Uses environment variables for endpoint configuration.
+    """
+    # 1. Resource Attributes: Generic metadata for client portability
+    resource = Resource.create(
+        {
+            "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
+            "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
+            "host.name": platform.node(),
+        }
+    )
+
+    # 2. Setup Tracing (for AI workflow logic)
+    tp = TracerProvider(resource=resource)
+
+    if os.environ.get("COREASON_VERITAS_TEST_MODE"):
+        # Use Console Exporter in Test Mode to avoid connection errors
+        # Use SimpleSpanProcessor to ensure synchronous export and avoid race conditions
+        tp.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    else:
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+
+    # Set global tracer provider
+    trace.set_tracer_provider(tp)
+
+    # 3. Setup Logging (for the Handshake and IER events)
+    lp = LoggerProvider(resource=resource)
+    _logs.set_logger_provider(lp)
+
+    if os.environ.get("COREASON_VERITAS_TEST_MODE"):
+        # Use Console Exporter in Test Mode
+        # Use SimpleLogRecordProcessor to ensure synchronous export
+        lp.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogRecordExporter()))
+    else:
+        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+
+    # Configure Loguru to use OTel Sink
+    configure_logging()
+
+
 class IERLogger:
     """
     Manages the connection to the OpenTelemetry collector and enforces strict
@@ -44,72 +86,14 @@ class IERLogger:
     """
 
     _instance: Optional["IERLogger"] = None
-    _initialized: bool = False
-    _service_name: str
+    _sinks: List[Callable[[Dict[str, Any]], None]] = []
+    tracer: trace.Tracer
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> "IERLogger":
+    def __new__(cls) -> "IERLogger":
         if cls._instance is None:
             cls._instance = super(IERLogger, cls).__new__(cls)
+            cls._instance.tracer = trace.get_tracer("veritas.audit")
         return cls._instance
-
-    def __init__(self, service_name: str = "coreason-veritas"):
-        """
-        Initialize the IERLogger.
-
-        Args:
-            service_name: The name of the service for the tracer.
-                          Defaults to "coreason-veritas" if not provided.
-        """
-        if self._initialized:
-            if getattr(self, "_service_name", None) != service_name:
-                logger.warning(
-                    f"IERLogger already initialized with service_name='{self._service_name}'. "
-                    f"Ignoring new service_name='{service_name}'."
-                )
-            return
-
-        self._service_name = service_name
-
-        # 1. Resource Attributes: Generic metadata for client portability
-        resource = Resource.create(
-            {
-                "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
-                "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
-                "host.name": platform.node(),
-            }
-        )
-
-        # 2. Setup Tracing (for AI workflow logic)
-        tp = TracerProvider(resource=resource)
-        # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
-
-        if os.environ.get("COREASON_VERITAS_TEST_MODE"):
-            # Use Console Exporter in Test Mode to avoid connection errors
-            # Use SimpleSpanProcessor to ensure synchronous export and avoid race conditions
-            tp.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-        else:
-            tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-
-        # Guard: Check if a tracer provider is already set to avoid warnings/errors
-        trace.set_tracer_provider(tp)
-        self.tracer = trace.get_tracer("veritas.audit")
-
-        # 3. Setup Logging (for the Handshake and IER events)
-        lp = LoggerProvider(resource=resource)
-        _logs.set_logger_provider(lp)
-
-        if os.environ.get("COREASON_VERITAS_TEST_MODE"):
-            # Use Console Exporter in Test Mode
-            # Use SimpleLogRecordProcessor to ensure synchronous export
-            lp.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogRecordExporter()))
-        else:
-            lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
-
-        # Configure Loguru to use OTel Sink
-        configure_logging()
-
-        self._sinks: List[Callable[[Dict[str, Any]], None]] = []
-        self._initialized = True
 
     def register_sink(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """

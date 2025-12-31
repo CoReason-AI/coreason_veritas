@@ -34,68 +34,162 @@ def get_public_key_from_store() -> str:
     return key
 
 
-def _prepare_governance(
-    func: Callable[..., Any],
-    args: Any,
-    kwargs: Any,
-    asset_id_arg: str,
-    signature_arg: str,
-    user_id_arg: str,
-    config_arg: Optional[str],
-    allow_unsigned: bool,
-) -> Tuple[Dict[str, str], inspect.BoundArguments]:
+class GovernanceContext:
     """
-    Helper function to inspect arguments, perform Gatekeeper checks, and sanitize configuration.
-    It returns the audit attributes and the bound arguments (which may be modified).
+    Context Manager that encapsulates the governance workflow (Gatekeeper, Auditor, Anchor).
+    It replaces the redundant logic in the decorator branches.
     """
-    sig = inspect.signature(func)
-    try:
-        bound = sig.bind(*args, **kwargs)
-    except TypeError as e:
-        raise TypeError(f"Arguments mapping failed: {e}") from e
 
-    bound.apply_defaults()
-    arguments = bound.arguments
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+        asset_id_arg: str,
+        signature_arg: str,
+        user_id_arg: str,
+        config_arg: Optional[str],
+        allow_unsigned: bool,
+    ):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.asset_id_arg = asset_id_arg
+        self.signature_arg = signature_arg
+        self.user_id_arg = user_id_arg
+        self.config_arg = config_arg
+        self.allow_unsigned = allow_unsigned
 
-    # 1. Gatekeeper Check
-    asset = arguments.get(asset_id_arg)
-    user_id = arguments.get(user_id_arg)
-    signature = arguments.get(signature_arg)
+        self.start_time: float = 0.0
+        self.attributes: Dict[str, str] = {}
+        self.bound_args: Optional[inspect.BoundArguments] = None
 
-    if asset is None:
-        raise ValueError(f"Missing asset argument: {asset_id_arg}")
-    if user_id is None:
-        raise ValueError(f"Missing user ID argument: {user_id_arg}")
+        # internal state
+        self._audit_span_ctx: Any = None
+        self._anchor_ctx: Any = None
 
-    attributes = {
-        "asset": str(asset),  # Legacy support from spec example
-        "co.asset_id": str(asset),
-        "co.user_id": str(user_id),
-    }
+    def _prepare_governance(self) -> None:
+        """
+        Inspect arguments, perform Gatekeeper checks, and sanitize configuration.
+        Populates self.attributes and self.bound_args.
+        """
+        sig = inspect.signature(self.func)
+        try:
+            bound = sig.bind(*self.args, **self.kwargs)
+        except TypeError as e:
+            raise TypeError(f"Arguments mapping failed: {e}") from e
 
-    # Draft Mode Logic
-    if allow_unsigned and signature is None:
-        # Bypass signature check and inject Draft Mode tag
-        attributes["co.compliance_mode"] = "DRAFT"
-    else:
-        # Strict Mode (Default)
-        if signature is None:
-            raise ValueError(f"Missing signature argument: {signature_arg}")
+        bound.apply_defaults()
+        arguments = bound.arguments
 
-        # Retrieve key from store (Env Var)
-        public_key = get_public_key_from_store()
-        SignatureValidator(public_key).verify_asset(asset, signature)
+        # 1. Gatekeeper Check
+        asset = arguments.get(self.asset_id_arg)
+        user_id = arguments.get(self.user_id_arg)
+        signature = arguments.get(self.signature_arg)
 
-        attributes["co.srb_sig"] = str(signature)
+        if asset is None:
+            raise ValueError(f"Missing asset argument: {self.asset_id_arg}")
+        if user_id is None:
+            raise ValueError(f"Missing user ID argument: {self.user_id_arg}")
 
-    # 2. Config Sanitization
-    if config_arg and config_arg in arguments:
-        original_config = arguments[config_arg]
-        if isinstance(original_config, dict):
-            sanitized_config = DeterminismInterceptor.enforce_config(original_config)
-            arguments[config_arg] = sanitized_config
+        self.attributes = {
+            "asset": str(asset),
+            "co.asset_id": str(asset),
+            "co.user_id": str(user_id),
+        }
 
-    return attributes, bound
+        # Draft Mode Logic
+        if self.allow_unsigned and signature is None:
+            self.attributes["co.compliance_mode"] = "DRAFT"
+        else:
+            if signature is None:
+                raise ValueError(f"Missing signature argument: {self.signature_arg}")
+
+            public_key = get_public_key_from_store()
+            SignatureValidator(public_key).verify_asset(asset, signature)
+
+            self.attributes["co.srb_sig"] = str(signature)
+
+        # 2. Config Sanitization
+        if self.config_arg and self.config_arg in arguments:
+            original_config = arguments[self.config_arg]
+            if isinstance(original_config, dict):
+                sanitized_config = DeterminismInterceptor.enforce_config(original_config)
+                arguments[self.config_arg] = sanitized_config
+
+        self.bound_args = bound
+
+    def __enter__(self) -> inspect.BoundArguments:
+        self.start_time = time.perf_counter()
+        try:
+            self._prepare_governance()
+            assert self.bound_args is not None
+
+            # Log Start
+            safe_args = scrub_sensitive_data(self.bound_args.arguments)
+            logger.bind(**self.attributes).info(
+                "Governance Execution Started", safe_payload=safe_args, function=self.func.__name__
+            )
+
+            # Start Audit Span
+            self._audit_span_ctx = IERLogger().start_governed_span(self.func.__name__, self.attributes)
+            self._audit_span_ctx.__enter__()
+
+            # Start Anchor Scope
+            self._anchor_ctx = DeterminismInterceptor.scope()
+            self._anchor_ctx.__enter__()
+
+            return self.bound_args
+
+        except Exception as e:
+            self._handle_exception(e)
+            raise e
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        # Exit Anchor Scope
+        if self._anchor_ctx:
+            self._anchor_ctx.__exit__(exc_type, exc_value, traceback)
+
+        # Exit Audit Span
+        if self._audit_span_ctx:
+            self._audit_span_ctx.__exit__(exc_type, exc_value, traceback)
+
+        if exc_type:
+            self._handle_exception(exc_value)
+        else:
+            self._log_end(success=True)
+
+    def _log_end(self, success: bool) -> None:
+        duration_ms = (time.perf_counter() - self.start_time) * 1000
+        verdict = "ALLOWED" if success else "BLOCKED"
+        # If attributes were never set (e.g. failure in init), use fallback
+        attrs = self.attributes if self.attributes else {"co.error": "PrepareGovernanceFailed"}
+
+        if success:
+            logger.bind(**attrs).info(
+                "Governance Execution Completed",
+                duration_ms=duration_ms,
+                verdict=verdict,
+                function=self.func.__name__,
+            )
+        else:
+            # For failure, we log exception in handle_exception usually,
+            # but log_end is for the audit trail "Completed" message if desired,
+            # or we just rely on the exception log.
+            # The original code logged "Governance Execution Completed" even on failure in the finally block logic?
+            # Actually, original code had:
+            # log_end(attributes, start_time, success=False) inside except block
+            logger.bind(**attrs).info(
+                "Governance Execution Completed",
+                duration_ms=duration_ms,
+                verdict=verdict,
+                function=self.func.__name__,
+            )
+
+    def _handle_exception(self, e: Exception) -> None:
+        attrs = self.attributes if self.attributes else {"co.error": "PrepareGovernanceFailed"}
+        logger.bind(**attrs).exception(f"Governance Execution Failed: {e}")
+        self._log_end(success=False)
 
 
 def governed_execution(
@@ -107,67 +201,19 @@ def governed_execution(
 ) -> Callable[..., Any]:
     """
     Decorator that bundles Gatekeeper, Auditor, and Anchor into a single atomic wrapper.
-
-    Args:
-        asset_id_arg: The name of the keyword argument containing the asset/spec.
-        signature_arg: The name of the keyword argument containing the signature.
-        user_id_arg: The name of the keyword argument containing the user ID.
-        config_arg: Optional name of the keyword argument containing the configuration dict to be sanitized.
-        allow_unsigned: If True, allows execution without a valid signature (Draft Mode).
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def log_start(attributes: Dict[str, str], bound: inspect.BoundArguments) -> None:
-            # Scrub arguments
-            safe_args = scrub_sensitive_data(bound.arguments)
-            logger.bind(**attributes).info(
-                "Governance Execution Started", safe_payload=safe_args, function=func.__name__
-            )
-
-        def log_end(attributes: Dict[str, str], start_time: float, success: bool = True) -> None:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            verdict = "ALLOWED" if success else "BLOCKED"
-            logger.bind(**attributes).info(
-                "Governance Execution Completed",
-                duration_ms=duration_ms,
-                verdict=verdict,
-                function=func.__name__,
-            )
-
         if inspect.isasyncgenfunction(func):
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        with DeterminismInterceptor.scope():
-                            async for item in func(*bound.args, **bound.kwargs):
-                                yield item
-
-                    log_end(attributes, start_time, success=True)
-
-                except Exception as e:
-                    # If attributes is not defined (prepare governance failed), we try to get what we can
-                    # but typically we just log error.
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                context = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                with context as bound:
+                    async for item in func(*bound.args, **bound.kwargs):
+                        yield item
 
             return wrapper
 
@@ -175,32 +221,11 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        with DeterminismInterceptor.scope():
-                            yield from func(*bound.args, **bound.kwargs)
-
-                    log_end(attributes, start_time, success=True)
-
-                except Exception as e:
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                context = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                with context as bound:
+                    yield from func(*bound.args, **bound.kwargs)
 
             return wrapper
 
@@ -208,35 +233,11 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    # 2. Start Audit Span
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        # 3. Anchor Context (Context Manager)
-                        with DeterminismInterceptor.scope():
-                            result = await func(*bound.args, **bound.kwargs)
-
-                    log_end(attributes, start_time, success=True)
-                    return result
-
-                except Exception as e:
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                context = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                with context as bound:
+                    return await func(*bound.args, **bound.kwargs)
 
             return wrapper
 
@@ -244,35 +245,11 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    # 2. Start Audit Span
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        # 3. Anchor Context (Context Manager)
-                        with DeterminismInterceptor.scope():
-                            result = func(*bound.args, **bound.kwargs)
-
-                    log_end(attributes, start_time, success=True)
-                    return result
-
-                except Exception as e:
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                context = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                with context as bound:
+                    return func(*bound.args, **bound.kwargs)
 
             return wrapper
 

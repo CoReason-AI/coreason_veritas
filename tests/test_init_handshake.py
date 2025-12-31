@@ -37,7 +37,9 @@ def test_init_audit_handshake() -> None:
         # Create a mock module for auditor
         mock_auditor_module = types.ModuleType("coreason_veritas.auditor")
         mock_ier_logger_class = MagicMock()
+        mock_configure = MagicMock()
         mock_auditor_module.IERLogger = mock_ier_logger_class  # type: ignore[attr-defined]
+        mock_auditor_module.configure_telemetry = mock_configure  # type: ignore[attr-defined]
 
         sys.modules["coreason_veritas.auditor"] = mock_auditor_module
 
@@ -50,6 +52,8 @@ def test_init_audit_handshake() -> None:
             # Call initialize explicitly
             coreason_veritas.initialize()
 
+            # Verify Telemetry Configured
+            mock_configure.assert_called_once()
             # Verify IERLogger was instantiated
             mock_ier_logger_class.assert_called_once()
             mock_ier_logger_class.return_value.emit_handshake.assert_called_once_with(coreason_veritas.__version__)
@@ -80,8 +84,10 @@ def test_init_audit_handshake_failure() -> None:
         # Create a mock module for auditor
         mock_auditor_module = types.ModuleType("coreason_veritas.auditor")
         mock_ier_logger_class = MagicMock()
+        mock_configure = MagicMock()
         mock_ier_logger_class.side_effect = Exception("Simulated Failure")
         mock_auditor_module.IERLogger = mock_ier_logger_class  # type: ignore[attr-defined]
+        mock_auditor_module.configure_telemetry = mock_configure  # type: ignore[attr-defined]
 
         sys.modules["coreason_veritas.auditor"] = mock_auditor_module
 
