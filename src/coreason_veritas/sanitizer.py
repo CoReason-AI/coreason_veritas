@@ -17,7 +17,8 @@ try:
     from presidio_analyzer import AnalyzerEngine
 
     _HAS_PRESIDIO = True
-except ImportError:  # pragma: no cover
+except (ImportError, Exception) as e:  # pragma: no cover
+    logger.warning(f"Failed to import presidio_analyzer: {e}")
     _HAS_PRESIDIO = False
 
 
