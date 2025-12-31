@@ -22,6 +22,7 @@ from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import SignatureValidator
 from coreason_veritas.logging_utils import scrub_sensitive_data
+from coreason_veritas.sanitizer import scrub_pii_recursive
 
 
 def get_public_key_from_store() -> str:
@@ -77,9 +78,18 @@ def _prepare_governance(
     if user_id is None:
         raise ValueError(f"Missing user ID argument: {user_id_arg}")
 
+    # Scrub potential PII from asset before using it in attributes
+    # We use scrub_pii_recursive to handle PII in values and circular refs
+    safe_asset = scrub_pii_recursive(asset)
+    str_asset = str(safe_asset)
+
+    # Truncate if too long (e.g. 2KB) to prevent Span attribute overflow
+    if len(str_asset) > 2048:
+        str_asset = str_asset[:2048] + "...[TRUNCATED]"
+
     attributes = {
-        "asset": str(asset),  # Legacy support from spec example
-        "co.asset_id": str(asset),
+        "asset": str_asset,  # Legacy support from spec example
+        "co.asset_id": str_asset,
         "co.user_id": str(user_id),
     }
 

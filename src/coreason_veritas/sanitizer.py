@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import threading
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from loguru import logger
 
@@ -113,6 +113,7 @@ def scrub_pii_payload(text: str | None) -> str | None:
 def scrub_pii_recursive(data: Any) -> Any:
     """
     Recursively scrub PII from data structures (dict, list) using an iterative stack-based approach.
+    Now supports circular reference detection.
     """
     if isinstance(data, str):
         return scrub_pii_payload(data)
@@ -120,20 +121,35 @@ def scrub_pii_recursive(data: Any) -> Any:
     if not isinstance(data, (dict, list, tuple)):
         return data
 
-    # Iterative stack-based approach to avoid RecursionError
+    # Map from id(source_obj) -> new_obj to handle circular references
+    memo: Dict[int, Any] = {}
 
+    def get_or_create_container(source: Any) -> Tuple[Any, bool]:
+        """
+        Returns (new_container, created)
+        """
+        source_id = id(source)
+        if source_id in memo:
+            return memo[source_id], False
+
+        new_obj: Any
+        if isinstance(source, dict):
+            new_obj = {}
+        else:
+            # List or Tuple -> converted to List for construction
+            new_obj = []
+
+        memo[source_id] = new_obj
+        return new_obj, True
+
+    # Root
     root_is_tuple = isinstance(data, tuple)
 
-    new_data: Any
-    if isinstance(data, dict):
-        new_data = data.copy()
-    elif isinstance(data, tuple):
-        new_data = list(data)
-    else:  # list
-        new_data = data[:]
+    # Initialize
+    new_root, _ = get_or_create_container(data)
 
     # Stack contains (target_container, source_container)
-    stack = [(new_data, data)]
+    stack = [(new_root, data)]
 
     while stack:
         target, source = stack.pop()
@@ -144,27 +160,43 @@ def scrub_pii_recursive(data: Any) -> Any:
         elif isinstance(source, (list, tuple)):
             iterator = enumerate(source)
         else:
-            continue  # pragma: no cover
+            continue
 
         for k, v in iterator:
             if isinstance(v, str):
-                target[k] = scrub_pii_payload(v)
+                val = scrub_pii_payload(v)
+                if isinstance(target, dict):
+                    target[k] = val
+                else: # list
+                    target.append(val)
+
             elif isinstance(v, (dict, list, tuple)):
-                # Create new container
-                new_sub: Any
-                if isinstance(v, dict):
-                    new_sub = v.copy()
-                elif isinstance(v, tuple):
-                    new_sub = list(v)
+                # Check cycle
+                v_id = id(v)
+                if v_id in memo:
+                    # Cycle detected or shared object
+                    val = memo[v_id]
+                    if isinstance(target, dict):
+                        target[k] = val
+                    else:
+                        target.append(val)
                 else:
-                    new_sub = v[:]
+                    # Create new container
+                    new_sub, _ = get_or_create_container(v)
+                    if isinstance(target, dict):
+                        target[k] = new_sub
+                    else:
+                        target.append(new_sub)
 
-                target[k] = new_sub
-                stack.append((new_sub, v))
+                    stack.append((new_sub, v))
             else:
-                target[k] = v
+                # Primitive
+                if isinstance(target, dict):
+                    target[k] = v
+                else:
+                    target.append(v)
 
-    if root_is_tuple:
-        return tuple(new_data)
+    if root_is_tuple and isinstance(new_root, list):
+        return tuple(new_root)
 
-    return new_data
+    return new_root
