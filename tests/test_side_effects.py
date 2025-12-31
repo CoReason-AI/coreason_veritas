@@ -8,11 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -42,7 +43,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -60,7 +61,7 @@ async def test_nested_governed_execution(key_pair: Tuple[RSAPrivateKey, str]) ->
     3. Anchor activation maintenance.
     """
     private_key, public_key_pem = key_pair
-    payload = {"data": "nested_test"}
+    payload = {"data": "nested_test", "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -69,10 +70,8 @@ async def test_nested_governed_execution(key_pair: Tuple[RSAPrivateKey, str]) ->
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
 
-            # We need to capture the spans to inspect their attributes
-            # The wrapper calls: with tracer.start_as_current_span(...) as span:
-
-            # To do this robustly with mocks, we can inspect the `start_as_current_span` call args.
+            # Use start_span for GovernanceContext
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def inner_task(spec: Dict[str, Any], sig: str, user: str) -> bool:
@@ -92,10 +91,10 @@ async def test_nested_governed_execution(key_pair: Tuple[RSAPrivateKey, str]) ->
             assert result is True, "Anchor should be active in both scopes"
 
             # Verify Spans
-            # We expect 2 calls to start_as_current_span
-            assert mock_tracer.start_as_current_span.call_count == 2
+            # We expect 2 calls to start_span
+            assert mock_tracer.start_span.call_count == 2
 
-            calls = mock_tracer.start_as_current_span.call_args_list
+            calls = mock_tracer.start_span.call_args_list
 
             # The calls happen in order: Outer, then Inner.
             outer_call = calls[0]
@@ -120,11 +119,14 @@ async def test_exception_state_recovery(key_pair: Tuple[RSAPrivateKey, str]) -> 
     Test that the anchor state is correctly reset when a governed function raises an exception.
     """
     private_key, public_key_pem = key_pair
-    payload = {"data": "fail_test"}
+    payload = {"data": "fail_test", "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        with patch("coreason_veritas.auditor.trace.get_tracer"):  # Mock to suppress actual OTel
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def failing_task(spec: Dict[str, Any], sig: str, user: str) -> None:

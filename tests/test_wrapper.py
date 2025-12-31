@@ -9,11 +9,12 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -42,7 +43,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -52,13 +53,39 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_missing_key_store_real(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure if key store env var is missing (without mocking the helper)."""
+    private_key, _ = key_pair
+    payload = {"data": "secure", "timestamp": datetime.now(timezone.utc).isoformat()}
+    signature = sign_payload(payload, private_key)
+
+    # Ensure Env Var is missing
+    with patch.dict(os.environ, {}, clear=True):
+        # We need to restore specific env vars if needed, but for this test simple clear might be too
+        # aggressive if pytest depends on env?
+        # Better to just pop the key.
+        pass
+
+    with patch.dict(os.environ):
+        if "COREASON_VERITAS_PUBLIC_KEY" in os.environ:
+            del os.environ["COREASON_VERITAS_PUBLIC_KEY"]
+
+        @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+        async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
+            return "Should not reach here"
+
+        with pytest.raises(ValueError, match="COREASON_VERITAS_PUBLIC_KEY environment variable is not set"):
+            await protected_function(spec=payload, sig=signature, user="user-123")
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test the full flow of governed execution."""
     private_key, public_key_pem = key_pair
 
     # Set Env Var for Key Store
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "secure"}
+        payload = {"data": "secure", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         # Mock IERLogger to avoid needing OTel setup
@@ -66,6 +93,9 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
+            # For sync/async, we now use start_span (manual context management)
+            mock_tracer.start_span.return_value = mock_span
+            # For generators (legacy path for now), we use start_as_current_span
             mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
@@ -78,9 +108,9 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
 
             assert result == "Processed test"
 
-            # Verify Auditor was called
-            mock_tracer.start_as_current_span.assert_called_once()
-            args, kwargs = mock_tracer.start_as_current_span.call_args
+            # Verify Auditor was called via start_span (GovernanceContext)
+            mock_tracer.start_span.assert_called_once()
+            args, kwargs = mock_tracer.start_span.call_args
             assert args[0] == "protected_function"
             attributes = kwargs["attributes"]
             assert attributes["co.asset_id"] == str(payload)
@@ -94,9 +124,9 @@ async def test_governed_execution_tampered(key_pair: Tuple[RSAPrivateKey, str]) 
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "secure"}
+        payload = {"data": "secure", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
-        tampered_payload = {"data": "hacked"}
+        tampered_payload = {"data": "hacked", "timestamp": payload["timestamp"]}
 
         @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
         async def protected_function(spec: Dict[str, Any], sig: str, user: str) -> str:
@@ -110,7 +140,7 @@ async def test_governed_execution_tampered(key_pair: Tuple[RSAPrivateKey, str]) 
 async def test_governed_execution_missing_key_store(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test failure if key store env var is missing."""
     private_key, _ = key_pair
-    payload = {"data": "secure"}
+    payload = {"data": "secure", "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     # Explicitly patch get_public_key_from_store to simulate missing env var, avoiding cache issues
@@ -184,7 +214,7 @@ async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "concurrent"}
+        payload = {"data": "concurrent", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
@@ -219,14 +249,14 @@ async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateK
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "error"}
+        payload = {"data": "error", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def failing_function(spec: Dict[str, Any], sig: str, user: str) -> None:
@@ -236,7 +266,7 @@ async def test_governed_execution_exception_handling(key_pair: Tuple[RSAPrivateK
                 await failing_function(spec=payload, sig=signature, user="u1")
 
             # Verify Auditor was still called (span started)
-            mock_tracer.start_as_current_span.assert_called_once()
+            mock_tracer.start_span.assert_called_once()
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -249,10 +279,10 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
     private_key, public_key_pem = key_pair
 
     # 1. Prepare Data for Outer and Inner layers
-    payload_outer = {"layer": "outer"}
+    payload_outer = {"layer": "outer", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_outer = sign_payload(payload_outer, private_key)
 
-    payload_inner = {"layer": "inner"}
+    payload_inner = {"layer": "inner", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_inner = sign_payload(payload_inner, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -261,8 +291,8 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            # Support context manager enter/exit
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            # Support manual span (GovernanceContext)
+            mock_tracer.start_span.return_value = mock_span
 
             # 2. Define Nested Functions
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
@@ -283,9 +313,8 @@ async def test_governed_execution_nested(key_pair: Tuple[RSAPrivateKey, str]) ->
             # 4. Verification
             assert result == "outer_processed_inner_result"
 
-            # 4 calls: Outer start, Inner start, Inner end, Outer end? No, calls to start_as_current_span.
-            # Expecting 2 calls.
-            assert mock_tracer.start_as_current_span.call_count == 2
+            # Expecting 2 calls to start_span
+            assert mock_tracer.start_span.call_count == 2
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -294,7 +323,7 @@ async def test_governed_execution_positional_args_mixed(key_pair: Tuple[RSAPriva
     Test that calling the governed function with positional arguments works.
     """
     private_key, public_key_pem = key_pair
-    payload = {"data": "secure"}
+    payload = {"data": "secure", "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -324,14 +353,14 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
     private_key, public_key_pem = key_pair
 
     # We need a payload that can decrease to base case
-    payload = {"count": 3}
+    payload = {"count": 3, "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def recursive_function(spec: Dict[str, Any], sig: str, user: str) -> int:
@@ -340,7 +369,7 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
                     return 0
 
                 # Create next payload
-                next_payload = {"count": count - 1}
+                next_payload = {"count": count - 1, "timestamp": datetime.now(timezone.utc).isoformat()}
                 next_sig = sign_payload(next_payload, private_key)
 
                 # Recursive call
@@ -351,7 +380,7 @@ async def test_governed_execution_recursive(key_pair: Tuple[RSAPrivateKey, str])
             assert result == 3
 
             # Verify spans: 3 (recursive) + 1 (initial) = 4 calls
-            assert mock_tracer.start_as_current_span.call_count == 4
+            assert mock_tracer.start_span.call_count == 4
 
 
 def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -361,14 +390,14 @@ def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) ->
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "sync"}
+        payload = {"data": "sync", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def sync_function(spec: Dict[str, Any], sig: str, user: str) -> str:
@@ -381,7 +410,7 @@ def test_governed_execution_sync_support(key_pair: Tuple[RSAPrivateKey, str]) ->
             assert result == "sync_result"
 
             # Verify Auditor
-            mock_tracer.start_as_current_span.assert_called_once()
+            mock_tracer.start_span.assert_called_once()
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -396,7 +425,7 @@ async def test_governed_execution_draft_mode(key_pair: Tuple[RSAPrivateKey, str]
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(
                 asset_id_arg="spec",
@@ -413,8 +442,8 @@ async def test_governed_execution_draft_mode(key_pair: Tuple[RSAPrivateKey, str]
             assert result == "draft_success"
 
             # Verify Span Attributes contain DRAFT tag
-            mock_tracer.start_as_current_span.assert_called_once()
-            _, kwargs = mock_tracer.start_as_current_span.call_args
+            mock_tracer.start_span.assert_called_once()
+            _, kwargs = mock_tracer.start_span.call_args
             attributes = kwargs["attributes"]
             assert attributes["co.compliance_mode"] == "DRAFT"
 
@@ -454,7 +483,7 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     def mock_func(a: int, b: int, asset: Dict[str, Any], sig: str, user: str) -> None:
         pass
 
-    asset = {"id": 1}
+    asset = {"id": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     # Use real key/signature to ensure verification logic passes in 'test mode'
     sig_val = sign_payload(asset, private_key)
     user_val = "user1"
@@ -492,7 +521,7 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
     def mock_func(asset: Dict[str, Any], sig: str, user: str) -> None:
         pass
 
-    asset = {"id": 1}
+    asset = {"id": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_val = sign_payload(asset, private_key)
     user_val = "user1"
 
@@ -524,7 +553,7 @@ def test_prepare_governance_sanitization(key_pair: Tuple[RSAPrivateKey, str]) ->
         pass
 
     risky_config = {"temperature": 0.9, "seed": 999}
-    asset = {"id": 1}
+    asset = {"id": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_val = sign_payload(asset, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -549,14 +578,14 @@ def test_governed_execution_sync_exception_handling(key_pair: Tuple[RSAPrivateKe
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "error"}
+        payload = {"data": "error", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def failing_sync_function(spec: Dict[str, Any], sig: str, user: str) -> None:
@@ -566,7 +595,7 @@ def test_governed_execution_sync_exception_handling(key_pair: Tuple[RSAPrivateKe
                 failing_sync_function(spec=payload, sig=signature, user="u1")
 
             # Verify Auditor was still called (span started)
-            mock_tracer.start_as_current_span.assert_called_once()
+            mock_tracer.start_span.assert_called_once()
 
 
 def test_governed_execution_generator_exception_handling(key_pair: Tuple[RSAPrivateKey, str]) -> None:
@@ -574,13 +603,13 @@ def test_governed_execution_generator_exception_handling(key_pair: Tuple[RSAPriv
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "gen_error"}
+        payload = {"data": "gen_error", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def failing_generator(spec: Dict[str, Any], sig: str, user: str) -> Any:
@@ -595,7 +624,7 @@ def test_governed_execution_generator_exception_handling(key_pair: Tuple[RSAPriv
                 next(gen)
 
             # Verify Span started
-            mock_tracer.start_as_current_span.assert_called_once()
+            mock_tracer.start_span.assert_called_once()
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -604,7 +633,7 @@ async def test_governed_execution_asyncgen_exception_handling(key_pair: Tuple[RS
     private_key, public_key_pem = key_pair
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
-        payload = {"data": "asyncgen_error"}
+        payload = {"data": "asyncgen_error", "timestamp": datetime.now(timezone.utc).isoformat()}
         signature = sign_payload(payload, private_key)
 
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
@@ -626,3 +655,56 @@ async def test_governed_execution_asyncgen_exception_handling(key_pair: Tuple[RS
 
             # Verify Span started (using start_span for async generators now)
             mock_tracer.start_span.assert_called_once()
+
+
+def test_governance_context_cleanup_exceptions(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test that exceptions during cleanup (reset/detach) are suppressed using dependency injection."""
+    from coreason_veritas.wrapper import GovernanceContext
+
+    private_key, public_key_pem = key_pair
+    payload = {"data": "cleanup", "timestamp": datetime.now(timezone.utc).isoformat()}
+    signature = sign_payload(payload, private_key)
+
+    # Mock Anchor Variable
+    mock_anchor_var = MagicMock()
+    mock_anchor_var.set.return_value = "mock_token"
+    mock_anchor_var.reset.side_effect = ValueError("Context diverged")
+
+    with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
+        with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
+            mock_tracer = MagicMock()
+            mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_span.return_value = MagicMock()
+
+            # Mock IERLogger to avoid interference from other tests or real init
+            with patch("coreason_veritas.wrapper.IERLogger") as mock_logger_cls:
+                mock_logger_cls.return_value.create_governed_span.return_value = mock_tracer.start_span.return_value
+
+                # Mock detach failure
+                with patch("opentelemetry.context.detach", side_effect=RuntimeError("Detach failed")):
+
+                    def dummy_func(spec: Dict[str, Any], sig: str, user: str) -> str:
+                        return "ok"
+
+                    ctx = GovernanceContext(
+                        func=dummy_func,
+                        args=(),
+                        kwargs={"spec": payload, "sig": signature, "user": "cleanup-user"},
+                        asset_id_arg="spec",
+                        signature_arg="sig",
+                        user_id_arg="user",
+                        config_arg=None,
+                        allow_unsigned=False,
+                        anchor_var=mock_anchor_var,  # Inject mock
+                    )
+
+                    ctx.prepare()
+
+                    # Run context manager
+                    with ctx:
+                        pass
+
+                    # If we reached here without exception, success.
+
+                    # Verify reset was called
+                    mock_anchor_var.reset.assert_called_with("mock_token")

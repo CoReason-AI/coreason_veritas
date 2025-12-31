@@ -8,11 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -40,7 +41,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -59,6 +60,8 @@ def test_verify_deeply_nested_payload(key_pair: Tuple[RSAPrivateKey, str]) -> No
     for i in range(depth):
         payload = {f"level_{i}": payload}
 
+    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+
     signature = sign_payload(payload, private_key)
 
     validator = SignatureValidator(public_key_pem)
@@ -73,7 +76,7 @@ def test_verify_large_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     # 1000 items, each item is approx 100 bytes -> 100KB
     # Let's go bigger: 10,000 items
     large_list = [{"id": i, "data": "x" * 50} for i in range(10000)]
-    payload = {"data": large_list, "meta": "large_payload_test"}
+    payload = {"data": large_list, "meta": "large_payload_test", "timestamp": datetime.now(timezone.utc).isoformat()}
 
     signature = sign_payload(payload, private_key)
 
@@ -92,6 +95,7 @@ def test_verify_unicode_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
         "emoji": "👋 🌍 🚀",
         "symbols": "≤≥≠≈∞",
         "mixed": "A string with unique chars: \u00e9 \u00f1 \u00ae",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     signature = sign_payload(payload, private_key)
@@ -107,7 +111,7 @@ async def test_governed_execution_heavy_data(key_pair: Tuple[RSAPrivateKey, str]
 
     # Create a reasonably heavy payload
     large_list = [{"id": i} for i in range(5000)]
-    payload = {"data": large_list}
+    payload = {"data": large_list, "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -116,7 +120,7 @@ async def test_governed_execution_heavy_data(key_pair: Tuple[RSAPrivateKey, str]
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def process_data(spec: Dict[str, Any], sig: str, user: str) -> int:
