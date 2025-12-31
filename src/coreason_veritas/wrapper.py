@@ -11,7 +11,7 @@
 import inspect
 import os
 import time
-from functools import wraps
+from functools import lru_cache, wraps
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from loguru import logger
@@ -33,6 +33,15 @@ def get_public_key_from_store() -> str:
     if not key:
         raise ValueError("COREASON_VERITAS_PUBLIC_KEY environment variable is not set.")
     return key
+
+
+@lru_cache(maxsize=4)
+def _get_validator(public_key: str) -> SignatureValidator:
+    """
+    Returns a SignatureValidator instance for the given public key.
+    Cached to avoid expensive key parsing on every call.
+    """
+    return SignatureValidator(public_key)
 
 
 def _prepare_governance(
@@ -85,7 +94,7 @@ def _prepare_governance(
 
         # Retrieve key from store (Env Var)
         public_key = get_public_key_from_store()
-        SignatureValidator(public_key).verify_asset(asset, signature)
+        _get_validator(public_key).verify_asset(asset, signature)
 
         attributes["co.srb_sig"] = str(signature)
 
