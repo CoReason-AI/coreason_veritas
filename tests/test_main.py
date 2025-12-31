@@ -28,6 +28,9 @@ def mock_httpx_client() -> Generator[AsyncMock, None, None]:
     """
     with patch("httpx.AsyncClient") as mock_cls:
         mock_instance = AsyncMock()
+        # Ensure build_request is synchronous (MagicMock), not async (AsyncMock)
+        # This prevents "coroutine never awaited" warnings because httpx.build_request is sync
+        mock_instance.build_request = MagicMock()
         mock_cls.return_value = mock_instance
         yield mock_instance
 
@@ -57,7 +60,11 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
         yield b'{"id": "chatcmpl-123", "choices": [{"message": {"content": "Hello world"}}]}'
 
     mock_response.aiter_bytes.return_value = iter_bytes()
-    mock_response.aclose = AsyncMock()
+
+    async def mock_aclose() -> None:
+        pass
+
+    mock_response.aclose = mock_aclose
 
     # Setup send return value
     mock_httpx_client.send.return_value = mock_response
@@ -116,8 +123,11 @@ def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx
         async def iter_bytes() -> AsyncGenerator[bytes, None]:
             yield b"{}"
 
+        async def mock_aclose() -> None:
+            pass
+
         mock_response.aiter_bytes.return_value = iter_bytes()
-        mock_response.aclose = AsyncMock()
+        mock_response.aclose = mock_aclose
         mock_httpx_client.send.return_value = mock_response
         mock_httpx_client.build_request.return_value = MagicMock()
 
@@ -153,8 +163,11 @@ def test_governed_inference_missing_auth_header(client: TestClient, mock_httpx_c
     async def iter_bytes() -> AsyncGenerator[bytes, None]:
         yield b"{}"
 
+    async def mock_aclose() -> None:
+        pass
+
     mock_response.aiter_bytes.return_value = iter_bytes()
-    mock_response.aclose = AsyncMock()
+    mock_response.aclose = mock_aclose
     mock_httpx_client.send.return_value = mock_response
     mock_httpx_client.build_request.return_value = MagicMock()
 
@@ -176,8 +189,11 @@ def test_governed_inference_upstream_error(client: TestClient, mock_httpx_client
     async def iter_bytes() -> AsyncGenerator[bytes, None]:
         yield b'{"error": "Internal Server Error"}'
 
+    async def mock_aclose() -> None:
+        pass
+
     mock_response.aiter_bytes.return_value = iter_bytes()
-    mock_response.aclose = AsyncMock()
+    mock_response.aclose = mock_aclose
     mock_httpx_client.send.return_value = mock_response
     mock_httpx_client.build_request.return_value = MagicMock()
 
@@ -185,6 +201,9 @@ def test_governed_inference_upstream_error(client: TestClient, mock_httpx_client
 
     # Check that we get the error body back
     assert response.json() == {"error": "Internal Server Error"}
+
+    # Ensure the background task (aclose) is executed or mocked properly to avoid warnings
+    # The warning comes because TestClient might not be fully draining background tasks with the mock
 
 
 def test_governed_inference_upstream_timeout(client: TestClient, mock_httpx_client: AsyncMock) -> None:
