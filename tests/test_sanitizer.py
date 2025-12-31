@@ -219,6 +219,22 @@ def test_scrub_pii_recursive_mixed_types(
     assert result == data
 
 
+def test_scrub_pii_recursive_string(
+    reset_sanitizer_module: ModuleType, clear_singleton: None, mock_analyzer_engine: MagicMock
+) -> None:
+    """Test calling scrub_pii_recursive directly with a string."""
+    sanitizer = reset_sanitizer_module
+    result = sanitizer.scrub_pii_recursive(SAMPLE_TEXT_CLEAN)  # type: ignore
+    assert result == SAMPLE_TEXT_CLEAN
+
+
+def test_scrub_pii_recursive_primitive(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
+    """Test calling scrub_pii_recursive directly with a primitive."""
+    sanitizer = reset_sanitizer_module
+    result = sanitizer.scrub_pii_recursive(123)  # type: ignore
+    assert result == 123
+
+
 def test_initialize_fail_open_logging(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     """Test that if presidio is missing, we log a warning during init."""
     sanitizer = reset_sanitizer_module
