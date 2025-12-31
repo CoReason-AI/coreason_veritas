@@ -61,7 +61,11 @@ class DeterminismInterceptor:
         # Enforce values
         sanitized["temperature"] = 0.0
         sanitized["top_p"] = 1.0
-        sanitized["seed"] = int(os.getenv("VERITAS_SEED", 42))
+        try:
+            sanitized["seed"] = int(os.getenv("VERITAS_SEED", 42))
+        except ValueError:
+            logger.warning("VERITAS_SEED is not a valid integer. Falling back to default 42.")
+            sanitized["seed"] = 42
 
         return sanitized
 

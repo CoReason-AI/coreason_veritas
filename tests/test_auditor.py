@@ -63,7 +63,10 @@ def test_initialization(
     mock_exporters: None,
 ) -> None:
     """Test that IERLogger initializes providers and exporters."""
+    from opentelemetry.trace import ProxyTracerProvider
+
     with (
+        patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()),
         patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
     ):
@@ -85,7 +88,10 @@ def test_ier_logger_singleton(
     mock_exporters: None,
 ) -> None:
     """Test that IERLogger is a singleton and initializes only once."""
+    from opentelemetry.trace import ProxyTracerProvider
+
     with (
+        patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()),
         patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
     ):
@@ -369,6 +375,10 @@ def test_ier_logger_production_mode_instantiation(
     with patch.dict("os.environ", {"COREASON_VERITAS_TEST_MODE": ""}):
         with (
             patch("coreason_veritas.auditor.trace.set_tracer_provider"),
+            patch(
+                "coreason_veritas.auditor.trace.get_tracer_provider",
+                return_value=MagicMock(spec=["not_proxy"]),
+            ),
             patch("coreason_veritas.auditor._logs.set_logger_provider"),
             patch("coreason_veritas.auditor.OTLPSpanExporter") as mock_span_exporter,
             patch("coreason_veritas.auditor.OTLPLogExporter") as mock_log_exporter,
@@ -377,18 +387,38 @@ def test_ier_logger_production_mode_instantiation(
             patch("coreason_veritas.auditor.configure_logging"),
         ):
             # Reset singleton to force re-init
-            IERLogger._instance = None
-            IERLogger._initialized = False
+            IERLogger.reset()
 
-            IERLogger()
+            # We need to ensure that get_tracer_provider returns a ProxyTracerProvider
+            # so that _initialize_providers proceeds.
+            # However, `trace.get_tracer_provider` is imported as `trace` in the module?
+            # No, `from opentelemetry import _logs, trace`
 
-            # Verify real exporters were instantiated
-            mock_span_exporter.assert_called_once()
-            mock_log_exporter.assert_called_once()
+            # In the code:
+            # if isinstance(trace.get_tracer_provider(), ProxyTracerProvider):
 
-            # Verify they were passed to processors
-            mock_bsp.assert_called_with(mock_span_exporter.return_value)
-            mock_blrp.assert_called_with(mock_log_exporter.return_value)
+            # So we need to mock trace.get_tracer_provider to return a ProxyTracerProvider instance
+            # OR we can rely on the fact that by default it returns a ProxyTracerProvider
+            # The issue in the previous run was likely that `trace.get_tracer_provider()` returned a Mock (or real provider)
+            # that was NOT an instance of ProxyTracerProvider because of the `mock_tracer_provider` fixture
+            # or some other patching.
+
+            # Actually, the `mock_tracer_provider` fixture patches `TracerProvider` class, not `trace.get_tracer_provider`
+            # function.
+
+            # We need to make sure `trace.get_tracer_provider()` returns an instance of ProxyTracerProvider
+            from opentelemetry.trace import ProxyTracerProvider
+
+            with patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()):
+                IERLogger()
+
+                # Verify real exporters were instantiated
+                mock_span_exporter.assert_called_once()
+                mock_log_exporter.assert_called_once()
+
+                # Verify they were passed to processors
+                mock_bsp.assert_called_with(mock_span_exporter.return_value)
+                mock_blrp.assert_called_with(mock_log_exporter.return_value)
 
 
 def test_start_governed_span_draft_mode(mock_exporters: None, mock_tracer: MagicMock) -> None:

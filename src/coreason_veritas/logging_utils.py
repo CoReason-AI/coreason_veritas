@@ -70,39 +70,30 @@ def scrub_sensitive_data(
     if isinstance(data, (dict, list, tuple, set)):
         seen[obj_id] = data
 
-    try:
-        if isinstance(data, dict):
-            new_dict = {}
-            for k, v in data.items():
-                if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
-                    new_dict[k] = "[REDACTED]"
-                else:
-                    new_dict[k] = scrub_sensitive_data(v, depth + 1, max_depth, seen)
-            return new_dict
-        elif isinstance(data, list):
-            return [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
-        elif isinstance(data, tuple):
-            return tuple(scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data)
-        elif isinstance(data, set):
-            # Convert set to sorted list if possible for deterministic logging, else just list
-            try:
-                return sorted([scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data])
-            except TypeError:
-                # Fallback if items are not comparable
-                return [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
-        elif hasattr(data, "__dict__"):
-            # Attempt to serialize object __dict__ if present
-            # We treat this as a dict but need to be careful not to recurse infinitely if __dict__ is complex
-            # We'll just convert to string representation for safety and simplicity as per "Enhance it"
-            return str(data)
-        else:
-            return data
-    finally:
-        # Clean up seen if we are exiting the root call?
-        # No, 'seen' is passed down. We don't remove from 'seen' on the way up
-        # because we want to catch references to parents (cycles).
-        # We don't need to manually clean up.
-        pass
+    if isinstance(data, dict):
+        new_dict = {}
+        for k, v in data.items():
+            if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
+                new_dict[k] = "[REDACTED]"
+            else:
+                new_dict[k] = scrub_sensitive_data(v, depth + 1, max_depth, seen)
+        return new_dict
+
+    if isinstance(data, (list, tuple)):
+        scrubbed = [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
+        return tuple(scrubbed) if isinstance(data, tuple) else scrubbed
+
+    if isinstance(data, set):
+        scrubbed_list = [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
+        try:
+            return sorted(scrubbed_list)
+        except TypeError:
+            return scrubbed_list
+
+    if hasattr(data, "__dict__"):
+        return str(data)
+
+    return data
 
 
 class OTelLogSink:

@@ -225,6 +225,22 @@ class GovernanceContext:
         self.__exit__(exc_type, exc_val, exc_tb)
 
 
+def _create_governance_context(
+    func: Callable[..., Any],
+    args: Any,
+    kwargs: Any,
+    asset_id_arg: str,
+    signature_arg: str,
+    user_id_arg: str,
+    config_arg: Optional[str],
+    allow_unsigned: bool,
+) -> Tuple[GovernanceContext, inspect.BoundArguments]:
+    """Helper to create and prepare GovernanceContext."""
+    ctx = GovernanceContext(func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned)
+    bound = ctx.prepare()
+    return ctx, bound
+
+
 def governed_execution(
     asset_id_arg: str,
     signature_arg: str,
@@ -248,10 +264,9 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx = GovernanceContext(
+                ctx, bound = _create_governance_context(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
-                bound = ctx.prepare()
                 async with ctx:
                     async for item in func(*bound.args, **bound.kwargs):
                         yield item
@@ -262,10 +277,9 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx = GovernanceContext(
+                ctx, bound = _create_governance_context(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
-                bound = ctx.prepare()
                 with ctx:
                     yield from func(*bound.args, **bound.kwargs)
 
@@ -275,10 +289,9 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx = GovernanceContext(
+                ctx, bound = _create_governance_context(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
-                bound = ctx.prepare()
                 async with ctx:
                     return await func(*bound.args, **bound.kwargs)
 
@@ -288,10 +301,9 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx = GovernanceContext(
+                ctx, bound = _create_governance_context(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
-                bound = ctx.prepare()
                 with ctx:
                     return func(*bound.args, **bound.kwargs)
 
