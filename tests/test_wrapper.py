@@ -61,7 +61,8 @@ async def test_governed_execution_missing_key_store_real(key_pair: Tuple[RSAPriv
 
     # Ensure Env Var is missing
     with patch.dict(os.environ, {}, clear=True):
-        # We need to restore specific env vars if needed, but for this test simple clear might be too aggressive if pytest depends on env?
+        # We need to restore specific env vars if needed, but for this test simple clear might be too
+        # aggressive if pytest depends on env?
         # Better to just pop the key.
         pass
 
@@ -694,7 +695,7 @@ def test_governance_context_cleanup_exceptions(key_pair: Tuple[RSAPrivateKey, st
                         user_id_arg="user",
                         config_arg=None,
                         allow_unsigned=False,
-                        anchor_var=mock_anchor_var  # Inject mock
+                        anchor_var=mock_anchor_var,  # Inject mock
                     )
 
                     ctx.prepare()
