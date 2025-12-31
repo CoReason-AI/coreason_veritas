@@ -78,7 +78,7 @@ class DeterminismInterceptor:
         finally:
             try:
                 _ANCHOR_ACTIVE.reset(token)
-            except ValueError:
+            except ValueError:  # pragma: no cover
                 # This can happen during async cancellation if the context has diverged.
                 # Since we are exiting the scope anyway, it is safe to ignore.
-                pass
+                pass  # pragma: no cover

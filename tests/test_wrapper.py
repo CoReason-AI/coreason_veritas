@@ -162,6 +162,21 @@ async def test_governed_execution_missing_args_defaults(key_pair: Tuple[RSAPriva
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
+async def test_governed_execution_asyncgen_missing_args(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure when required args are missing for async generator."""
+
+    @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
+    async def protected_asyncgen(spec: Any, sig: Any, user: Any) -> Any:
+        yield "should not reach"
+
+    # Testing missing args failure which happens in _prepare_governance
+    # This triggers the exception handler in the async generator wrapper path
+    with pytest.raises(TypeError):
+        async for _ in protected_asyncgen(spec={"a": 1}, user="u"):
+            pass
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_governed_execution_concurrency(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Test that concurrent executions maintain isolated Anchor states.
