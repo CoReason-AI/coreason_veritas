@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
@@ -167,7 +167,7 @@ def scrub_pii_recursive(data: Any) -> Any:
                 val = scrub_pii_payload(v)
                 if isinstance(target, dict):
                     target[k] = val
-                else: # list
+                else:  # list
                     target.append(val)
 
             elif isinstance(v, (dict, list, tuple)):
