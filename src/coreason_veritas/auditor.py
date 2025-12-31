@@ -80,6 +80,15 @@ class IERLogger:
         )
 
         # 2. Setup Tracing (for AI workflow logic)
+        # Check if a tracer provider is already set to avoid warnings/errors
+        # trace.get_tracer_provider() returns a ProxyTracerProvider if not set
+        # But determining if it's "real" or "proxy" is internal.
+        # We try to set it, but we might get a warning if it's already set.
+        # Ideally, we should check if we can control it.
+
+        # In a real-world scenario with other libraries setting OTel, we might want to attach to existing.
+        # For now, we attempt to set it if we believe we own it.
+
         tp = TracerProvider(resource=resource)
         # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
 
@@ -90,8 +99,14 @@ class IERLogger:
         else:
             tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 
-        # Guard: Check if a tracer provider is already set to avoid warnings/errors
-        trace.set_tracer_provider(tp)
+        try:
+            # This throws a warning if already set, but doesn't crash usually.
+            # However, if we want to be clean, we can catch or check.
+            trace.set_tracer_provider(tp)
+        except Exception as e:
+            logger.warning(f"Failed to set tracer provider (might be already set): {e}")
+
+        # Always get the tracer from the (possibly global) provider
         self.tracer = trace.get_tracer("veritas.audit")
 
         # 3. Setup Logging (for the Handshake and IER events)
@@ -110,6 +125,15 @@ class IERLogger:
 
         self._sinks: List[Callable[[Dict[str, Any]], None]] = []
         self._initialized = True
+
+    @classmethod
+    def reset(cls) -> None:
+        """
+        Reset the singleton instance. Useful for testing.
+        Note: This does NOT reset the global OpenTelemetry TracerProvider.
+        """
+        cls._instance = None
+        cls._initialized = False
 
     def register_sink(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """
@@ -130,23 +154,10 @@ class IERLogger:
         # Unified logging via Loguru
         logger.bind(co_veritas_version=version, co_governance_status="active").info("Veritas Engine Initialized")
 
-    @contextlib.contextmanager
-    def start_governed_span(self, name: str, attributes: Dict[str, str]) -> Generator[trace.Span, None, None]:
+    def _validate_and_prepare_span(self, name: str, attributes: Dict[str, str]) -> Dict[str, str]:
         """
-        Starts an OTel span with mandatory GxP attributes.
-
-        Mandatory Attributes (should be present in attributes or context):
-        - `co.user_id`: Who initiated the action?
-        - `co.asset_id`: What code is running?
-        - `co.srb_sig`: Proof of validation.
-        - `co.determinism_verified`: Boolean flag from the Anchor.
-
-        Args:
-            name: The name of the span.
-            attributes: Dictionary of attributes to add to the span.
-
-        Raises:
-            ValueError: If any mandatory attribute is missing.
+        Validates attributes and returns the final attribute dictionary.
+        Broadcasts to sinks.
         """
         # Prepare attributes
         span_attributes = attributes.copy()
@@ -169,20 +180,37 @@ class IERLogger:
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
-            # Broadcast to external sinks (Glass Box)
-            timestamp = datetime.now(timezone.utc).isoformat()
-            event_payload = {
-                "span_name": name,
-                "attributes": span_attributes,
-                "timestamp": timestamp,
-            }
-            for sink in self._sinks:
-                try:
-                    sink(event_payload)
-                except Exception as e:
-                    # Fail Closed: If an audit sink fails, the entire operation must fail.
-                    logger.exception(f"Audit Sink Failure: {e}")
-                    raise e
+        # Broadcast to external sinks (Glass Box)
+        timestamp = datetime.now(timezone.utc).isoformat()
+        event_payload = {
+            "span_name": name,
+            "attributes": span_attributes,
+            "timestamp": timestamp,
+        }
+        for sink in self._sinks:
+            try:
+                sink(event_payload)
+            except Exception as e:
+                # Fail Closed: If an audit sink fails, the entire operation must fail.
+                logger.exception(f"Audit Sink Failure: {e}")
+                raise e
 
+        return span_attributes
+
+    def create_governed_span(self, name: str, attributes: Dict[str, str]) -> trace.Span:
+        """
+        Creates and starts a span but does NOT activate it in the current context.
+        Useful for async generators where context management needs to be manual.
+        """
+        span_attributes = self._validate_and_prepare_span(name, attributes)
+        return self.tracer.start_span(name, attributes=span_attributes)
+
+    @contextlib.contextmanager
+    def start_governed_span(self, name: str, attributes: Dict[str, str]) -> Generator[trace.Span, None, None]:
+        """
+        Starts an OTel span with mandatory GxP attributes AND activates it in context.
+        """
+        span_attributes = self._validate_and_prepare_span(name, attributes)
+
+        with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
             yield span

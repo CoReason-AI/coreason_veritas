@@ -14,6 +14,7 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 from loguru import logger
+from opentelemetry._logs.severity import SeverityNumber
 
 from coreason_veritas.logging_utils import (
     InterceptHandler,
@@ -109,11 +110,11 @@ class TestLoggingUtils(unittest.TestCase):
         sink._logger = MagicMock()
 
         levels = [
-            (5, 5),  # Trace
-            (20, 9),  # Info
-            (30, 13),  # Warning
-            (40, 17),  # Error
-            (50, 21),  # Critical
+            (5, SeverityNumber.DEBUG),  # Trace
+            (20, SeverityNumber.INFO),  # Info
+            (30, SeverityNumber.WARN),  # Warning
+            (40, SeverityNumber.ERROR),  # Error
+            (50, SeverityNumber.FATAL),  # Critical
         ]
 
         for loguru_no, otel_severity in levels:

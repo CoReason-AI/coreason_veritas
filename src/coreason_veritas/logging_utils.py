@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 from opentelemetry import _logs, trace
+from opentelemetry._logs.severity import SeverityNumber
 
 # Sensitive keys to redact
 SENSITIVE_KEYS = {
@@ -31,26 +32,77 @@ SENSITIVE_KEYS = {
     "jwt",
 }
 
+# Add any additional sensitive keys from environment configuration
+_extra_keys = os.environ.get("VERITAS_SENSITIVE_KEYS", "")
+if _extra_keys:
+    SENSITIVE_KEYS.update(k.strip() for k in _extra_keys.split(",") if k.strip())
 
-def scrub_sensitive_data(data: Any) -> Any:
+
+def scrub_sensitive_data(
+    data: Any,
+    depth: int = 0,
+    max_depth: int = 20,
+    seen: Optional[Dict[int, Any]] = None,
+) -> Any:
     """
     Recursively scrubs sensitive keys from dictionaries and lists.
     Returns a new structure with redacted values.
+
+    Features:
+    - Recursion depth limit (defaults to 20)
+    - Circular reference detection
+    - Set conversion to list
+    - Custom object handling (via string representation)
     """
-    if isinstance(data, dict):
-        new_dict = {}
-        for k, v in data.items():
-            if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
-                new_dict[k] = "[REDACTED]"
-            else:
-                new_dict[k] = scrub_sensitive_data(v)
-        return new_dict
-    elif isinstance(data, list):
-        return [scrub_sensitive_data(item) for item in data]
-    elif isinstance(data, tuple):
-        return tuple(scrub_sensitive_data(item) for item in data)
-    else:
-        return data
+    if seen is None:
+        seen = {}
+
+    # Check max depth
+    if depth > max_depth:
+        return "[TRUNCATED_DEPTH]"
+
+    # Check circular reference
+    obj_id = id(data)
+    if obj_id in seen:
+        return "[CIRCULAR_REF]"
+
+    # We only track container types for circular reference
+    if isinstance(data, (dict, list, tuple, set)):
+        seen[obj_id] = data
+
+    try:
+        if isinstance(data, dict):
+            new_dict = {}
+            for k, v in data.items():
+                if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
+                    new_dict[k] = "[REDACTED]"
+                else:
+                    new_dict[k] = scrub_sensitive_data(v, depth + 1, max_depth, seen)
+            return new_dict
+        elif isinstance(data, list):
+            return [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
+        elif isinstance(data, tuple):
+            return tuple(scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data)
+        elif isinstance(data, set):
+            # Convert set to sorted list if possible for deterministic logging, else just list
+            try:
+                return sorted([scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data])
+            except TypeError:
+                # Fallback if items are not comparable
+                return [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
+        elif hasattr(data, "__dict__"):
+            # Attempt to serialize object __dict__ if present
+            # We treat this as a dict but need to be careful not to recurse infinitely if __dict__ is complex
+            # We'll just convert to string representation for safety and simplicity as per "Enhance it"
+            return str(data)
+        else:
+            return data
+    finally:
+        # Clean up seen if we are exiting the root call?
+        # No, 'seen' is passed down. We don't remove from 'seen' on the way up
+        # because we want to catch references to parents (cycles).
+        # We don't need to manually clean up.
+        pass
 
 
 class OTelLogSink:
@@ -79,15 +131,15 @@ class OTelLogSink:
         # Trace=1, Debug=5, Info=9, Warn=13, Error=17, Fatal=21
         level_no = record["level"].no
         if level_no < 20:  # Trace(5), Debug(10) -> DEBUG
-            severity_number = 5  # DEBUG
+            severity_number = SeverityNumber.DEBUG
         elif level_no < 30:  # Info (20) / Success (25)
-            severity_number = 9  # INFO
+            severity_number = SeverityNumber.INFO
         elif level_no < 40:  # Warning (30)
-            severity_number = 13  # WARN
+            severity_number = SeverityNumber.WARN
         elif level_no < 50:  # Error (40)
-            severity_number = 17  # ERROR
+            severity_number = SeverityNumber.ERROR
         else:  # Critical (50)
-            severity_number = 21  # FATAL
+            severity_number = SeverityNumber.FATAL
 
         # Construct attributes
         attributes = {
