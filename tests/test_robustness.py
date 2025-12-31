@@ -1,7 +1,7 @@
 import importlib
 import os
 from typing import Any, Dict
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -110,7 +110,9 @@ def test_auditor_init_tracer_provider_failure() -> None:
             pass
 
     logger_provider_mock = patch(
-        "coreason_veritas.auditor._logs.set_logger_provider", side_effect=Exception("Logger Provider exists")
+        "coreason_veritas.auditor._logs.set_logger_provider",
+        side_effect=Exception("Logger Provider exists"),
+        new_callable=MagicMock,
     )
     with logger_provider_mock:
         with patch("coreason_veritas.auditor.logger.warning") as mock_warning:
