@@ -17,7 +17,7 @@ import os
 from loguru import logger
 
 from .anchor import DeterminismInterceptor
-from .auditor import IERLogger
+from .auditor import IERLogger, configure_telemetry
 from .gatekeeper import SignatureValidator
 from .wrapper import governed_execution
 
@@ -35,6 +35,7 @@ def initialize() -> None:
     """
     if not os.environ.get("COREASON_VERITAS_TEST_MODE"):
         try:
+            configure_telemetry()
             _auditor = IERLogger()
             _auditor.emit_handshake(__version__)
         except Exception as e:

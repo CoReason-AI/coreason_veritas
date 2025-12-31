@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from coreason_veritas.anchor import DeterminismInterceptor
-from coreason_veritas.auditor import IERLogger
+from coreason_veritas.auditor import IERLogger, configure_telemetry
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -46,6 +46,10 @@ def mock_tracer(mock_tracer_provider: MagicMock) -> Generator[MagicMock, None, N
 
 @pytest.fixture  # type: ignore[misc]
 def mock_exporters() -> Generator[None, None, None]:
+    # Reset singleton and sinks before each test
+    IERLogger._instance = None
+    IERLogger._sinks = []
+
     with (
         patch("coreason_veritas.auditor.OTLPSpanExporter"),
         patch("coreason_veritas.auditor.OTLPLogExporter"),
@@ -56,18 +60,18 @@ def mock_exporters() -> Generator[None, None, None]:
         yield
 
 
-def test_initialization(
+def test_configure_telemetry(
     mock_otlp_env: None,
     mock_tracer_provider: MagicMock,
     mock_logger_provider: MagicMock,
     mock_exporters: None,
 ) -> None:
-    """Test that IERLogger initializes providers and exporters."""
+    """Test that configure_telemetry initializes providers and exporters."""
     with (
         patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
         patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
     ):
-        IERLogger()
+        configure_telemetry()
 
         # Verify TracerProvider setup
         mock_tracer_provider.assert_called_once()
@@ -78,33 +82,16 @@ def test_initialization(
         mock_set_lp.assert_called_once()
 
 
-def test_ier_logger_singleton(
-    mock_otlp_env: None,
-    mock_tracer_provider: MagicMock,
-    mock_logger_provider: MagicMock,
-    mock_exporters: None,
-) -> None:
-    """Test that IERLogger is a singleton and initializes only once."""
-    with (
-        patch("coreason_veritas.auditor.trace.set_tracer_provider") as mock_set_tp,
-        patch("coreason_veritas.auditor._logs.set_logger_provider") as mock_set_lp,
-    ):
-        logger1 = IERLogger()
-        logger2 = IERLogger()
-
-        # Check identity
-        assert logger1 is logger2
-
-        # Check initialization called only once
-        mock_tracer_provider.assert_called_once()
-        mock_set_tp.assert_called_once()
-        mock_logger_provider.assert_called_once()
-        mock_set_lp.assert_called_once()
+def test_ier_logger_singleton() -> None:
+    """Test that IERLogger is a singleton."""
+    logger1 = IERLogger()
+    logger2 = IERLogger()
+    assert logger1 is logger2
 
 
 def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test emit_handshake logs correct message."""
-    logger_instance = IERLogger("test-service")
+    logger_instance = IERLogger()
 
     # Mock loguru logger
     with patch("coreason_veritas.auditor.logger") as mock_logger:
@@ -119,7 +106,7 @@ def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
 
 def test_start_governed_span_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that start_governed_span adds attributes and creates a span."""
-    logger = IERLogger("test-service")
+    logger = IERLogger()
 
     attributes = {"co.user_id": "user-123", "co.asset_id": "asset-456", "co.srb_sig": "sig-789"}
 
@@ -145,7 +132,7 @@ def test_start_governed_span_attributes(mock_exporters: None, mock_tracer: Magic
 
 def test_start_governed_span_with_anchor(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that co.determinism_verified is True when Anchor is active."""
-    logger = IERLogger("test-service")
+    logger = IERLogger()
     anchor = DeterminismInterceptor()
     attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s"}
 
@@ -161,7 +148,7 @@ def test_start_governed_span_with_anchor(mock_exporters: None, mock_tracer: Magi
 
 def test_start_governed_span_missing_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that missing mandatory attributes raise ValueError."""
-    logger = IERLogger("test-service")
+    logger = IERLogger()
 
     with patch("coreason_veritas.auditor.logger"):
         # Missing all
@@ -182,7 +169,7 @@ def test_start_governed_span_non_string_attributes(mock_exporters: None, mock_tr
     """
     Test that start_governed_span handles non-string attribute values.
     """
-    logger = IERLogger("test-service")
+    logger = IERLogger()
 
     # Pass int and bool
     attributes = {"co.user_id": 123, "co.asset_id": "asset-456", "co.srb_sig": "sig-789", "custom": True}
@@ -203,7 +190,7 @@ def test_start_governed_span_non_string_attributes(mock_exporters: None, mock_tr
 
 def test_start_governed_span_none_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test behavior when attributes contain None."""
-    logger = IERLogger("test-service")
+    logger = IERLogger()
     attributes = {"co.user_id": "u", "co.asset_id": "a", "co.srb_sig": "s", "nullable": None}
 
     mock_span = MagicMock()
@@ -218,7 +205,7 @@ def test_start_governed_span_none_attributes(mock_exporters: None, mock_tracer: 
 
 def test_start_governed_span_extra_attributes(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test that extra attributes are passed through."""
-    logger = IERLogger("test-service")
+    logger = IERLogger()
     attributes = {
         "co.user_id": "u",
         "co.asset_id": "a",
@@ -243,7 +230,7 @@ def test_start_governed_span_empty_mandatory_values(mock_exporters: None, mock_t
     """
     Test that empty strings for mandatory attributes are accepted if keys exist.
     """
-    logger = IERLogger("test-service")
+    logger = IERLogger()
     attributes = {"co.user_id": "", "co.asset_id": "", "co.srb_sig": ""}
 
     mock_span = MagicMock()
@@ -255,17 +242,17 @@ def test_start_governed_span_empty_mandatory_values(mock_exporters: None, mock_t
     mock_tracer.start_as_current_span.assert_called_once()
 
 
-def test_initialization_env_var_precedence(
+def test_configure_telemetry_env_var_precedence(
     mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock, mock_exporters: None
 ) -> None:
-    """Test that OTEL_SERVICE_NAME env var overrides constructor argument."""
+    """Test that OTEL_SERVICE_NAME env var overrides default argument."""
     with (
         patch.dict("os.environ", {"OTEL_SERVICE_NAME": "env-service"}),
         patch("coreason_veritas.auditor.trace.set_tracer_provider"),
         patch("coreason_veritas.auditor._logs.set_logger_provider"),
         patch("coreason_veritas.auditor.Resource.create") as mock_resource_create,
     ):
-        IERLogger("arg-service")
+        configure_telemetry("arg-service")
 
         # Verify resource creation used env var
         mock_resource_create.assert_called_once()
@@ -279,7 +266,7 @@ def test_register_sink_and_execution(mock_exporters: None, mock_tracer: MagicMoc
     Test that registered sinks are called with the correct payload
     when start_governed_span is invoked.
     """
-    logger = IERLogger("test-service")
+    logger = IERLogger()
 
     # Define a mock sink
     mock_sink = MagicMock()
@@ -312,7 +299,7 @@ def test_sink_exception_suppression(mock_exporters: None, mock_tracer: MagicMock
     """
     Test that exceptions in sinks are caught and do not crash the application.
     """
-    logger = IERLogger("test-service")
+    logger = IERLogger()
 
     # Define a sink that raises an exception
     def failing_sink(payload: Dict[str, Any]) -> None:
@@ -333,36 +320,7 @@ def test_sink_exception_suppression(mock_exporters: None, mock_tracer: MagicMock
     # Loguru should have logged the error (we could mock loguru but ensuring no crash is main goal)
 
 
-def test_ier_logger_reinitialization_warning(caplog: Any) -> None:
-    """Test that re-initializing IERLogger with different service name logs a warning."""
-    # Reset singleton
-    IERLogger._instance = None
-    IERLogger._initialized = False
-
-    with (
-        patch("coreason_veritas.auditor.trace.set_tracer_provider"),
-        patch("coreason_veritas.auditor._logs.set_logger_provider"),
-        patch("coreason_veritas.auditor.configure_logging"),
-        patch("coreason_veritas.auditor.logger") as mock_logger,
-    ):
-        # First init
-        logger1 = IERLogger(service_name="service-1")
-        assert logger1._service_name == "service-1"
-
-        # Second init with same name - no warning
-        IERLogger(service_name="service-1")
-        # Ensure warning was not called
-        assert mock_logger.warning.call_count == 0
-
-        # Third init with different name - should warn
-        IERLogger(service_name="service-2")
-        mock_logger.warning.assert_called_once()
-        assert "Ignoring new service_name='service-2'" in mock_logger.warning.call_args[0][0]
-
-
-def test_ier_logger_production_mode_instantiation(
-    mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock
-) -> None:
+def test_configure_telemetry_production_mode(mock_tracer_provider: MagicMock, mock_logger_provider: MagicMock) -> None:
     """
     Test that in production mode (TEST_MODE unset), real OTLP exporters are instantiated.
     """
@@ -376,11 +334,7 @@ def test_ier_logger_production_mode_instantiation(
             patch("coreason_veritas.auditor.BatchLogRecordProcessor") as mock_blrp,
             patch("coreason_veritas.auditor.configure_logging"),
         ):
-            # Reset singleton to force re-init
-            IERLogger._instance = None
-            IERLogger._initialized = False
-
-            IERLogger()
+            configure_telemetry()
 
             # Verify real exporters were instantiated
             mock_span_exporter.assert_called_once()
@@ -395,7 +349,7 @@ def test_start_governed_span_draft_mode(mock_exporters: None, mock_tracer: Magic
     """
     Test that start_governed_span allows missing signature if co.compliance_mode is DRAFT.
     """
-    logger = IERLogger("test-service")
+    logger = IERLogger()
 
     attributes = {
         "co.user_id": "u",

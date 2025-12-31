@@ -43,7 +43,7 @@ def reset_singleton() -> Generator[None, None, None]:
     into the IERLogger initialization (e.g. for trace providers).
     """
     IERLogger._instance = None
-    IERLogger._initialized = False
+    IERLogger._sinks = []
     yield
     IERLogger._instance = None
-    IERLogger._initialized = False
+    IERLogger._sinks = []
