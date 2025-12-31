@@ -21,8 +21,8 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
-from coreason_veritas.wrapper import governed_execution
 from coreason_veritas.sanitizer import scrub_pii_recursive
+from coreason_veritas.wrapper import governed_execution
 
 # --- Helpers ---
 
