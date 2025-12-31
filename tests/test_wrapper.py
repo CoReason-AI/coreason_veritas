@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
 from coreason_veritas.wrapper import _prepare_governance, governed_execution
+from coreason_veritas.sanitizer import scrub_pii_recursive
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -113,7 +114,8 @@ async def test_governed_execution_success(key_pair: Tuple[RSAPrivateKey, str]) -
             args, kwargs = mock_tracer.start_span.call_args
             assert args[0] == "protected_function"
             attributes = kwargs["attributes"]
-            assert attributes["co.asset_id"] == str(payload)
+            # Check scrubbed payload
+            assert attributes["co.asset_id"] == str(scrub_pii_recursive(payload))
             assert attributes["co.user_id"] == "user-123"
             assert attributes["co.srb_sig"] == signature
 
@@ -505,7 +507,7 @@ def test_prepare_governance_helper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
         )
 
         # Verify attributes
-        assert attributes["co.asset_id"] == str(asset)
+        assert attributes["co.asset_id"] == str(scrub_pii_recursive(asset))
         assert attributes["co.user_id"] == user_val
         assert attributes["co.srb_sig"] == sig_val
 
@@ -541,7 +543,7 @@ def test_prepare_governance_positional_args(key_pair: Tuple[RSAPrivateKey, str])
             allow_unsigned=False,
         )
 
-        assert attributes["co.asset_id"] == str(asset)
+        assert attributes["co.asset_id"] == str(scrub_pii_recursive(asset))
         assert bound.arguments["asset"] == asset
 
 
