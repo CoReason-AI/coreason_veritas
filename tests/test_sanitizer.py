@@ -1,4 +1,3 @@
-
 # Copyright (c) 2025 CoReason, Inc.
 #
 # This software is proprietary and dual-licensed.
@@ -12,16 +11,17 @@
 import importlib
 import sys
 from types import ModuleType
-from typing import Any, Generator
+from typing import Any, Dict, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 
 def test_scrub_pii_recursive_infinite_loop(reset_sanitizer_module: ModuleType, clear_singleton: None) -> None:
     sanitizer = reset_sanitizer_module
 
     # Create a circular reference
-    data = {"a": 1}
+    data: Dict[str, Any] = {"a": 1}
     data["b"] = data
 
     # This should finish and not hang
@@ -30,6 +30,7 @@ def test_scrub_pii_recursive_infinite_loop(reset_sanitizer_module: ModuleType, c
     assert result["a"] == 1
     # Check if the cycle is preserved in the output
     assert result["b"] is result
+
 
 # Sample text with PII
 SAMPLE_TEXT_CLEAN = "This is a safe string."
