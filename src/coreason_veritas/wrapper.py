@@ -99,6 +99,132 @@ def _prepare_governance(
     return attributes, bound
 
 
+class GovernanceContext:
+    """
+    Manages the lifecycle of a governed execution, handling:
+    1. Preparation (Gatekeeper, Argument binding)
+    2. Logging (Start/End)
+    3. OTel Span Management
+    4. Anchor Context Management
+    """
+
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        args: Any,
+        kwargs: Any,
+        asset_id_arg: str,
+        signature_arg: str,
+        user_id_arg: str,
+        config_arg: Optional[str],
+        allow_unsigned: bool,
+        anchor_var: Any = None,
+    ):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.asset_id_arg = asset_id_arg
+        self.signature_arg = signature_arg
+        self.user_id_arg = user_id_arg
+        self.config_arg = config_arg
+        self.allow_unsigned = allow_unsigned
+        self.anchor_var = anchor_var or coreason_veritas.anchor._ANCHOR_ACTIVE
+
+        self.attributes: Dict[str, str] = {}
+        self.bound: Optional[inspect.BoundArguments] = None
+        self.start_time: float = 0.0
+        self.span: Optional[trace.Span] = None
+        self.token_otel: Any = None
+        self.token_anchor: Any = None
+        self.ier_logger = IERLogger()
+
+    def prepare(self) -> inspect.BoundArguments:
+        self.start_time = time.perf_counter()
+        try:
+            self.attributes, self.bound = _prepare_governance(
+                self.func,
+                self.args,
+                self.kwargs,
+                self.asset_id_arg,
+                self.signature_arg,
+                self.user_id_arg,
+                self.config_arg,
+                self.allow_unsigned,
+            )
+            self._log_start()
+            return self.bound
+        except Exception as e:
+            self._handle_error(e)
+            raise e
+
+    def _log_start(self) -> None:
+        if self.bound:
+            safe_args = scrub_sensitive_data(self.bound.arguments)
+            logger.bind(**self.attributes).info(
+                "Governance Execution Started", safe_payload=safe_args, function=self.func.__name__
+            )
+
+    def _log_end(self, success: bool = True) -> None:
+        duration_ms = (time.perf_counter() - self.start_time) * 1000
+        verdict = "ALLOWED" if success else "BLOCKED"
+        attrs = self.attributes or {"co.error": "PrepareGovernanceFailed"}
+        logger.bind(**attrs).info(
+            "Governance Execution Completed",
+            duration_ms=duration_ms,
+            verdict=verdict,
+            function=self.func.__name__,
+        )
+
+    def _handle_error(self, e: Exception) -> None:
+        if not self.attributes:
+            self.attributes = {"co.error": "PrepareGovernanceFailed"}
+
+        logger.bind(**self.attributes).exception(f"Governance Execution Failed: {e}")
+        self._log_end(success=False)
+
+    def __enter__(self) -> "GovernanceContext":
+        self.span = self.ier_logger.create_governed_span(self.func.__name__, self.attributes)
+
+        # Activate OTel Context
+        ctx = trace.set_span_in_context(self.span)
+        self.token_otel = context.attach(ctx)
+
+        # Activate Anchor
+        self.token_anchor = self.anchor_var.set(True)
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        try:
+            if self.token_anchor:
+                self.anchor_var.reset(self.token_anchor)
+        except ValueError:
+            pass
+
+        try:
+            if self.token_otel:
+                context.detach(self.token_otel)
+        except BaseException:
+            pass
+
+        if self.span:
+            self.span.end()
+
+        if exc_type:
+            # Error handling is done in _handle_error if we called it explicitly?
+            # Wait, if an exception happens in the `with` block, __exit__ is called with exc_type.
+            # We should call _handle_error here.
+            self._handle_error(exc_val)
+        else:
+            self._log_end(success=True)
+
+    # For Async Context Manager support
+    async def __aenter__(self) -> "GovernanceContext":
+        return self.__enter__()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.__exit__(exc_type, exc_val, exc_tb)
+
+
 def governed_execution(
     asset_id_arg: str,
     signature_arg: str,
@@ -118,82 +244,17 @@ def governed_execution(
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        def log_start(attributes: Dict[str, str], bound: inspect.BoundArguments) -> None:
-            # Scrub arguments
-            safe_args = scrub_sensitive_data(bound.arguments)
-            logger.bind(**attributes).info(
-                "Governance Execution Started", safe_payload=safe_args, function=func.__name__
-            )
-
-        def log_end(attributes: Dict[str, str], start_time: float, success: bool = True) -> None:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            verdict = "ALLOWED" if success else "BLOCKED"
-            logger.bind(**attributes).info(
-                "Governance Execution Completed",
-                duration_ms=duration_ms,
-                verdict=verdict,
-                function=func.__name__,
-            )
-
         if inspect.isasyncgenfunction(func):
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                attributes: Dict[str, str] = {}
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    # Manually handle span and context to support async generator cancellation
-                    ier_logger = IERLogger()
-                    span = ier_logger.create_governed_span(func.__name__, attributes)
-
-                    # Activate context
-                    ctx = trace.set_span_in_context(span)
-                    token_otel = context.attach(ctx)
-
-                    try:
-                        # Activate Anchor
-                        token_anchor = coreason_veritas.anchor._ANCHOR_ACTIVE.set(True)
-                        try:
-                            async for item in func(*bound.args, **bound.kwargs):
-                                yield item
-                        finally:
-                            try:
-                                coreason_veritas.anchor._ANCHOR_ACTIVE.reset(token_anchor)
-                            except ValueError:  # pragma: no cover
-                                # Context diverged, ignore
-                                pass  # pragma: no cover
-                    finally:
-                        try:
-                            context.detach(token_otel)
-                        except BaseException:  # pragma: no cover
-                            # Context diverged, ignore
-                            pass  # pragma: no cover
-
-                        span.end()
-
-                    log_end(attributes, start_time, success=True)
-
-                except Exception as e:
-                    # If attributes is not defined (prepare governance failed), we try to get what we can
-                    # but typically we just log error.
-                    if not attributes:
-                        attributes = {"co.error": "PrepareGovernanceFailed"}
-
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                ctx = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                bound = ctx.prepare()
+                async with ctx:
+                    async for item in func(*bound.args, **bound.kwargs):
+                        yield item
 
             return wrapper
 
@@ -201,32 +262,12 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        with DeterminismInterceptor.scope():
-                            yield from func(*bound.args, **bound.kwargs)
-
-                    log_end(attributes, start_time, success=True)
-
-                except Exception as e:
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                ctx = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                bound = ctx.prepare()
+                with ctx:
+                    yield from func(*bound.args, **bound.kwargs)
 
             return wrapper
 
@@ -234,35 +275,12 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    # 2. Start Audit Span
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        # 3. Anchor Context (Context Manager)
-                        with DeterminismInterceptor.scope():
-                            result = await func(*bound.args, **bound.kwargs)
-
-                    log_end(attributes, start_time, success=True)
-                    return result
-
-                except Exception as e:
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                ctx = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                bound = ctx.prepare()
+                async with ctx:
+                    return await func(*bound.args, **bound.kwargs)
 
             return wrapper
 
@@ -270,35 +288,12 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                start_time = time.perf_counter()
-                try:
-                    attributes, bound = _prepare_governance(
-                        func,
-                        args,
-                        kwargs,
-                        asset_id_arg,
-                        signature_arg,
-                        user_id_arg,
-                        config_arg,
-                        allow_unsigned,
-                    )
-                    log_start(attributes, bound)
-
-                    # 2. Start Audit Span
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        # 3. Anchor Context (Context Manager)
-                        with DeterminismInterceptor.scope():
-                            result = func(*bound.args, **bound.kwargs)
-
-                    log_end(attributes, start_time, success=True)
-                    return result
-
-                except Exception as e:
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
-                    logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
-                    log_end(attributes, start_time, success=False)
-                    raise e
+                ctx = GovernanceContext(
+                    func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
+                )
+                bound = ctx.prepare()
+                with ctx:
+                    return func(*bound.args, **bound.kwargs)
 
             return wrapper
 

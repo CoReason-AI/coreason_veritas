@@ -9,11 +9,12 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Tuple, cast
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -41,7 +42,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -61,13 +62,13 @@ async def test_blast_radius(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     private_key, public_key_pem = key_pair
 
     # Payloads
-    payload_outer = {"task": "outer"}
+    payload_outer = {"task": "outer", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_outer = sign_payload(payload_outer, private_key)
 
-    payload_inner_a = {"task": "inner_a"}
+    payload_inner_a = {"task": "inner_a", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_inner_a = sign_payload(payload_inner_a, private_key)
 
-    payload_inner_b = {"task": "inner_b"}
+    payload_inner_b = {"task": "inner_b", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_inner_b = sign_payload(payload_inner_b, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -76,8 +77,8 @@ async def test_blast_radius(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            # Support context manager enter/exit
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            # Support GovernanceContext manual span
+            mock_tracer.start_span.return_value = mock_span
 
             # Define Inner A (Success)
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
@@ -110,9 +111,9 @@ async def test_blast_radius(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 
             # Verification
             # We expect 3 spans to have been started: Outer, Inner A, Inner B.
-            assert mock_tracer.start_as_current_span.call_count == 3
+            assert mock_tracer.start_span.call_count == 3
 
-            calls = mock_tracer.start_as_current_span.call_args_list
+            calls = mock_tracer.start_span.call_args_list
             func_names = [call[0][0] for call in calls]
 
             assert "outer_task" in func_names
@@ -129,7 +130,7 @@ async def test_detached_task_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
     """
     private_key, public_key_pem = key_pair
 
-    payload = {"task": "detached"}
+    payload = {"task": "detached", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -138,7 +139,7 @@ async def test_detached_task_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             # Background Task
             async def background_worker(queue: "asyncio.Queue[bool]") -> None:
@@ -172,7 +173,7 @@ async def test_determinism_enforcement_integration(key_pair: Tuple[RSAPrivateKey
     """
     private_key, public_key_pem = key_pair
 
-    payload = {"task": "enforcement"}
+    payload = {"task": "enforcement", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -180,7 +181,7 @@ async def test_determinism_enforcement_integration(key_pair: Tuple[RSAPrivateKey
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def llm_client_user(spec: Dict[str, Any], sig: str, user: str) -> Dict[str, Any]:
@@ -207,10 +208,10 @@ async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     private_key, public_key_pem = key_pair
 
-    payload_outer = {"layer": "outer"}
+    payload_outer = {"layer": "outer", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_outer = sign_payload(payload_outer, private_key)
 
-    payload_inner = {"layer": "inner"}
+    payload_inner = {"layer": "inner", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig_inner = sign_payload(payload_inner, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -218,7 +219,7 @@ async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             # Inner Governed
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
@@ -242,7 +243,7 @@ async def test_sandwich_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 
             assert result == "inner_done"
             # Verify 2 spans (Outer, Inner)
-            assert mock_tracer.start_as_current_span.call_count == 2
+            assert mock_tracer.start_span.call_count == 2
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -253,7 +254,7 @@ async def test_trace_context_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
     """
     private_key, public_key_pem = key_pair
 
-    payload = {"task": "tracing"}
+    payload = {"task": "tracing", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -261,6 +262,7 @@ async def test_trace_context_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
+            mock_tracer.start_span.return_value = MagicMock()
 
             # Setup a real span to serve as parent context
             # (In a real app, this comes from HTTP headers or upstream)
@@ -275,12 +277,12 @@ async def test_trace_context_propagation(key_pair: Tuple[RSAPrivateKey, str]) ->
             # that the *real* context propagation happened unless we inspect calls.
             # But we can verify that `start_as_current_span` was called.
 
-            # To test propagation, we rely on the fact that `IERLogger` uses `start_as_current_span`.
-            # If `start_as_current_span` is called, OTel handles the rest.
+            # To test propagation, we rely on the fact that `IERLogger` uses `start_span`.
+            # If `start_span` is called, OTel handles the rest.
 
             await traced_func(spec=payload, sig=sig, user="trace_user")
 
             # Verify call
-            mock_tracer.start_as_current_span.assert_called_once()
-            args, kwargs = mock_tracer.start_as_current_span.call_args
+            mock_tracer.start_span.assert_called_once()
+            args, kwargs = mock_tracer.start_span.call_args
             assert args[0] == "traced_func"
