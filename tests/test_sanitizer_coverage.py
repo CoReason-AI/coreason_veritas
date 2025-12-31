@@ -1,9 +1,11 @@
+
+from unittest.mock import MagicMock
 from typing import Any, Dict, List
-from unittest.mock import patch
 
 import pytest
 
-from coreason_veritas.sanitizer import PIIAnalyzer, scrub_pii_payload, scrub_pii_recursive
+import coreason_veritas.sanitizer
+from coreason_veritas.sanitizer import scrub_pii_recursive, scrub_pii_payload
 
 
 def test_circular_reference_dict() -> None:
@@ -87,27 +89,38 @@ def test_nested_tuple_conversion() -> None:
 
 def test_scrub_pii_payload_value_error_too_large() -> None:
     """Test error handling for large payload raising ValueError."""
-    # Ensure analyzer is initialized
-    analyzer_instance = PIIAnalyzer().get_analyzer()
-    assert analyzer_instance is not None
+    # Manually replace PIIAnalyzer in the module
+    original_cls = coreason_veritas.sanitizer.PIIAnalyzer
 
-    # Patch the analyze method of the singleton instance's analyzer
-    with patch.object(
-        analyzer_instance,
-        "analyze",
-        side_effect=ValueError("[E088] Text of length 2000000 exceeds maximum"),
-    ):
+    MockPIIAnalyzer = MagicMock()
+    coreason_veritas.sanitizer.PIIAnalyzer = MockPIIAnalyzer
+
+    try:
+        # Configure mock chain to raise ValueError
+        mock_instance = MockPIIAnalyzer.return_value
+        mock_engine = mock_instance.get_analyzer.return_value
+        mock_engine.analyze.side_effect = ValueError("[E088] Text of length 2000000 exceeds maximum")
+
         result = scrub_pii_payload("A very large string")
         assert result == "<REDACTED: PAYLOAD TOO LARGE FOR PII ANALYSIS>"
+    finally:
+        coreason_veritas.sanitizer.PIIAnalyzer = original_cls
 
 
 def test_scrub_pii_payload_unexpected_error() -> None:
     """Test error handling for unexpected exceptions."""
-    # Ensure analyzer is initialized
-    analyzer_instance = PIIAnalyzer().get_analyzer()
-    assert analyzer_instance is not None
+    original_cls = coreason_veritas.sanitizer.PIIAnalyzer
 
-    # Patch the analyze method of the singleton instance's analyzer
-    with patch.object(analyzer_instance, "analyze", side_effect=Exception("Boom")):
+    MockPIIAnalyzer = MagicMock()
+    coreason_veritas.sanitizer.PIIAnalyzer = MockPIIAnalyzer
+
+    try:
+        # Configure mock chain to raise generic Exception
+        mock_instance = MockPIIAnalyzer.return_value
+        mock_engine = mock_instance.get_analyzer.return_value
+        mock_engine.analyze.side_effect = Exception("Boom")
+
         with pytest.raises(Exception, match="Boom"):
             scrub_pii_payload("test")
+    finally:
+        coreason_veritas.sanitizer.PIIAnalyzer = original_cls
