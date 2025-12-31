@@ -204,3 +204,41 @@ class IERLogger:
 
         with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
             yield span
+
+    def log_llm_transaction(
+        self,
+        trace_id: str,
+        user_id: str,
+        project_id: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+        latency_ms: int,
+    ) -> None:
+        """
+        Log an LLM transaction with standardized attributes for governance and auditing.
+
+        Args:
+            trace_id: The request trace ID.
+            user_id: The ID of the user initiating the request.
+            project_id: The ID of the project/asset.
+            model: The name of the model used.
+            input_tokens: Number of input tokens.
+            output_tokens: Number of output tokens.
+            cost_usd: Estimated cost in USD.
+            latency_ms: Latency in milliseconds.
+        """
+        logger.bind(
+            **{
+                "gen_ai.system": "coreason-platform",
+                "gen_ai.request.model": model,
+                "gen_ai.usage.input_tokens": input_tokens,
+                "gen_ai.usage.output_tokens": output_tokens,
+                "gen_ai.usage.cost": cost_usd,
+                "co.user_id": user_id,
+                "co.asset_id": project_id,
+                "trace_id": trace_id,
+                "latency_ms": latency_ms,
+            }
+        ).info("LLM Transaction Recorded")
