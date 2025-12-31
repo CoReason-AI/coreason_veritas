@@ -25,13 +25,18 @@ SAMPLE_TEXT_PII = "My email is gowtham@coreason.ai and phone is 555-0199."
 def reset_sanitizer_module() -> Generator[ModuleType, None, None]:
     """
     Fixture to reload the sanitizer module to ensure fresh state for globals/singletons.
+    Mocks presidio_analyzer to avoid ImportErrors on environments where it's broken (e.g. Py3.14).
     """
-    if "coreason_veritas.sanitizer" in sys.modules:
-        importlib.reload(sys.modules["coreason_veritas.sanitizer"])
-    else:
-        importlib.import_module("coreason_veritas.sanitizer")
+    mock_presidio = MagicMock()
+    mock_presidio.AnalyzerEngine = MagicMock
 
-    yield sys.modules["coreason_veritas.sanitizer"]
+    with patch.dict(sys.modules, {"presidio_analyzer": mock_presidio}):
+        if "coreason_veritas.sanitizer" in sys.modules:
+            importlib.reload(sys.modules["coreason_veritas.sanitizer"])
+        else:
+            importlib.import_module("coreason_veritas.sanitizer")
+
+        yield sys.modules["coreason_veritas.sanitizer"]
 
 
 @pytest.fixture  # type: ignore[misc]
