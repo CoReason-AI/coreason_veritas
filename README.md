@@ -18,7 +18,6 @@ The stack defined in our `pyproject.toml` is focused and lightweight, designed f
 
 *   **opentelemetry-api**: We depend on OTel to treat AI reasoning traces as critical infrastructure telemetry, enabling cloud-native, enterprise-grade observability.
 *   **cryptography**: This powers our **Gatekeeper** function. We use asymmetric cryptographic verification to ensure that "Agent Specs" have not been tampered with since they were signed by a Scientific Review Board.
-*   **pydantic**: Demonstrates our commitment to strict data validation and type safety, which is essential for structured data handling in GxP environments.
 *   **loguru**: Used for developer ergonomics and structured logging output.
 
 The internal logic is structured around three atomic units that execute in a specific sequence:
@@ -69,8 +68,6 @@ For developers integrating directly with LLM clients (like OpenAI or Anthropic),
 ```python
 from coreason_veritas.anchor import DeterminismInterceptor
 
-interceptor = DeterminismInterceptor()
-
 # An unsafe config that might produce hallucinations (high temp, random seed)
 risky_config = {
     "model": "gpt-4",
@@ -80,7 +77,7 @@ risky_config = {
 }
 
 # The interceptor forcibly overrides stochastic params
-safe_config = interceptor.enforce_config(risky_config)
+safe_config = DeterminismInterceptor.enforce_config(risky_config)
 
 print(safe_config)
 # Output:
@@ -88,7 +85,7 @@ print(safe_config)
 #   "model": "gpt-4",
 #   "temperature": 0.0,  <-- Sanitized
 #   "top_p": 1.0,        <-- Sanitized
-#   "seed": 42           <-- Injected
+#   "seed": 42           <-- Injected (Configurable via VERITAS_SEED)
 # }
 ```
 

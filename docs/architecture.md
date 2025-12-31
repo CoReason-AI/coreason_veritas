@@ -35,7 +35,7 @@ The system operates on a "Sandwich" model (Governed -> Ungoverned -> Governed) t
 *   **The "Lobotomy Protocol":** Inside this scope, the `DeterminismInterceptor` forcibly sets:
     *   `temperature = 0.0`
     *   `top_p = 1.0`
-    *   `seed = 42`
+    *   `seed = 42` (configurable via `VERITAS_SEED`)
 
 ## System Flow Diagram
 

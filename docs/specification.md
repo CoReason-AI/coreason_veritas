@@ -37,7 +37,8 @@ The package is structured into three primary enforcement modules corresponding t
 
 * **Library:** `cryptography`
 * **Algorithm:** SHA256 hashing with RSA-PSS padding (MGF1).
-* **Canonicalization:** JSON payloads must be sorted by keys before hashing to ensure consistency.
+* **Canonicalization:** Uses **JCS (JSON Canonicalization Scheme - RFC 8785)** to ensure strict, byte-level consistency across platforms.
+* **Replay Protection:** Enforces a mandatory `timestamp` field in the payload with a maximum skew of 5 minutes.
 * **Interface:** Accepts payload (dict) and signature (hex string).
 * **Failure:** Returns `False` on verification failure (Caller raises 403).
 
@@ -46,16 +47,18 @@ The package is structured into three primary enforcement modules corresponding t
 ```python
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+import jcs
 
 class SignatureValidator:
     def __init__(self, public_key_store: str = None):
         self.public_key_store = public_key_store
 
-    def verify_asset(self, asset_payload: dict, signature: str) -> bool:
+    def verify_asset(self, asset_payload: dict, signature: str, check_timestamp: bool = True) -> bool:
         """
-        1. Loads PEM public key.
-        2. Canonicalizes asset_payload (sort_keys=True).
-        3. Verifies signature against payload hash using padding.PSS.
+        1. Checks 'timestamp' for replay protection (max 5m skew).
+        2. Loads PEM public key.
+        3. Canonicalizes asset_payload using jcs.canonicalize().
+        4. Verifies signature against payload hash using padding.PSS.
         """
         pass
 
@@ -70,7 +73,7 @@ class SignatureValidator:
 * **The Lobotomy Protocol:**
 * `temperature` must be overwritten to `0.0`.
 * `top_p` must be overwritten to `1.0`.
-* `seed` must be injected as `42` (or project-specific constant).
+* `seed` must be injected as `42` (configurable via `VERITAS_SEED` environment variable).
 
 
 * **Implementation:** Static method that returns a sanitized *copy* of the configuration dictionary.
@@ -78,11 +81,13 @@ class SignatureValidator:
 **Key Class:** `DeterminismInterceptor`
 
 ```python
+import os
+
 class DeterminismInterceptor:
     @staticmethod
     def enforce_config(payload: dict) -> dict:
         """
-        Forcibly sets: temp=0.0, top_p=1.0, seed=42.
+        Forcibly sets: temp=0.0, top_p=1.0, seed=int(os.getenv("VERITAS_SEED", 42)).
         Returns sanitized copy of the payload.
         """
         pass
@@ -96,6 +101,7 @@ class DeterminismInterceptor:
 **Technical Requirements:**
 
 * **Protocol:** Must use `OTLPSpanExporter` and `OTLPLogExporter` (Proto over HTTP).
+* **Logging:** Uses `loguru` configured with an OTel sink for unified logging.
 * **Initialization:** Must emit a structured Log Record ("Handshake") on startup confirming `co.veritas.version`.
 * **Span Attributes:** The `start_governed_span` method must enforce the following GxP attributes:
 * `co.user_id`: Who initiated the action?
@@ -109,16 +115,17 @@ class DeterminismInterceptor:
 
 ```python
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from loguru import logger
 
 class IERLogger:
     def __init__(self):
         # Configure TracerProvider and LoggerProvider with OTLP exporters
+        # Configure Loguru to use OTel Sink
         pass
 
     def emit_handshake(self, version: str):
-        # Emits INFO log "Veritas Engine Initialized"
-        pass
+        # Emits INFO log "Veritas Engine Initialized" via loguru
+        logger.bind(co_veritas_version=version).info("Veritas Engine Initialized")
 
     def start_governed_span(self, name: str, attributes: dict):
         # Wraps tracer.start_as_current_span
@@ -146,10 +153,11 @@ from coreason_veritas import governed_execution
     asset_id_arg="spec_id",
     signature_arg="signature",
     user_id_arg="user_id",
-    config_arg="config"  # Optional
+    config_arg="config",  # Optional
+    allow_unsigned=False  # Set to True for Draft Mode (bypasses signature check)
 )
 async def execute_agent_logic(spec_id: str, signature: str, user_id: str, config: dict):
-    # 1. Gatekeeper runs first. If signature fails, this code is UNREACHABLE.
+    # 1. Gatekeeper runs first. If signature fails (and not draft mode), this code is UNREACHABLE.
     # 2. Auditor starts the Span.
     # 3. Anchor ensures determinism (sanitizing 'config').
     ...
@@ -161,7 +169,7 @@ async def execute_agent_logic(spec_id: str, signature: str, user_id: str, config
 ### **Deployment Mode A: Library Injection**
 
 * **Integration:** Used in `services.project_lock` and `integrations.asset_registry`.
-* **Lifecycle:** Auto-initializes `IERLogger` in `__init__.py` to ensure the audit handshake is recorded on process start.
+* **Lifecycle:** Requires explicit initialization via `coreason_veritas.initialize()` to ensure the audit handshake is recorded on process start.
 
 ### **Deployment Mode B: Gateway Proxy**
 
@@ -170,7 +178,7 @@ async def execute_agent_logic(spec_id: str, signature: str, user_id: str, config
 * **Behavior:**
 * Exposes `POST /v1/chat/completions`.
 * **Anchor:** Intercepts request -> Sanitizes config (Temp=0).
-* **Proxy:** Forwards to LLM Provider -> Returns response.
+* **Proxy:** Forwards to LLM Provider -> Returns streaming response.
 
 
 * **Configuration:** Reads `VERITAS_HOST` and `VERITAS_PORT` from environment variables.
@@ -184,18 +192,20 @@ class DeterminismInterceptor:
 
     @staticmethod
     def enforce_config(payload: dict) -> dict:
-        """The 'Lobotomy Protocol': Forcibly sets temp=0.0 and seed=42."""
+        """The 'Lobotomy Protocol': Forcibly sets temp=0.0 and seed=42 (or ENV)."""
         sanitized = payload.copy()
         sanitized["temperature"] = 0.0
-        sanitized["seed"] = 42
+        sanitized["seed"] = int(os.getenv("VERITAS_SEED", 42))
         sanitized["top_p"] = 1.0
         return sanitized
 
 2. src/coreason_veritas/gatekeeper.py
 This module acts as the "Supply Chain Security" layer.
 import json
+import jcs
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from datetime import datetime, timezone
 
 class SignatureValidator:
     """GATEKEEPER: Validates cryptographic signatures for Agent Specs."""
@@ -203,13 +213,20 @@ class SignatureValidator:
     def __init__(self, public_key_pem: str = None):
         self.public_key_pem = public_key_pem
 
-    def verify_asset(self, payload: dict, signature_hex: str) -> bool:
-        """Verifies if the asset payload matches the provided SRB signature."""
+    def verify_asset(self, payload: dict, signature_hex: str, check_timestamp: bool = True) -> bool:
+        """Verifies if the asset payload matches the provided SRB signature with replay protection."""
         if not signature_hex or not self.public_key_pem:
             return False
+
+        # Replay Protection (Example simplified)
+        if check_timestamp:
+            ts_str = payload.get("timestamp")
+            # ... logic to check ts_str against datetime.now() with 5m skew ...
+
         try:
             public_key = serialization.load_pem_public_key(self.public_key_pem.encode())
-            canonical_payload = json.dumps(payload, sort_keys=True).encode()
+            # Use JCS for canonicalization
+            canonical_payload = jcs.canonicalize(payload)
             public_key.verify(
                 bytes.fromhex(signature_hex),
                 canonical_payload,
@@ -230,16 +247,22 @@ from contextlib import asynccontextmanager
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from .anchor import DeterminismInterceptor
+import coreason_veritas
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize Veritas Engine Handshake
+    coreason_veritas.initialize()
+
     app.state.http_client = httpx.AsyncClient()
     yield
     await app.state.http_client.aclose()
 
 app = FastAPI(title="CoReason Veritas Gateway", lifespan=lifespan)
+LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "https://api.openai.com/v1/chat/completions")
 
 @app.post("/v1/chat/completions")
 async def governed_inference(request: Request):
@@ -251,12 +274,19 @@ async def governed_inference(request: Request):
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
     client = request.app.state.http_client
-    resp = await client.post(
-        "https://api.openai.com/v1/chat/completions",
-        json=governed_body,
-        headers={"Authorization": headers.get("authorization")}
+    # Forward essential headers
+    proxy_headers = {}
+    if "authorization" in headers:
+        proxy_headers["Authorization"] = headers["authorization"]
+
+    req = client.build_request("POST", LLM_PROVIDER_URL, json=governed_body, headers=proxy_headers)
+    r = await client.send(req, stream=True)
+
+    return StreamingResponse(
+        r.aiter_bytes(),
+        status_code=r.status_code,
+        media_type=r.headers.get("content-type")
     )
-    return resp.json()
 
 FastAPIInstrumentor.instrument_app(app)
 
@@ -270,29 +300,33 @@ def run_server():
 
 4. src/coreason_veritas/__init__.py
 Standardized entry point that initializes the auditor handshake.
-import logging
+from loguru import logger
 from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
 from .anchor import DeterminismInterceptor
+from .wrapper import governed_execution
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
-try:
-    _auditor = IERLogger()
-    _auditor.emit_handshake(__version__)
-except Exception as e:
-    logging.getLogger("coreason.veritas").error(f"MACO Audit Link Failed: {e}")
+def initialize():
+    """Explicitly initializes the Veritas Engine and emits the handshake."""
+    try:
+        _auditor = IERLogger()
+        _auditor.emit_handshake(__version__)
+    except Exception as e:
+        logger.error(f"MACO Audit Link Failed: {e}")
 
 5.) src/coreason_veritas/auditor.py
 This module handles the heavy lifting of connecting to the VM Vault. It is designed to be generic and environment-aware.
 
 import os
-import logging
+import platform
+from loguru import logger
 from opentelemetry import trace, _logs
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -305,7 +339,7 @@ class IERLogger:
         resource = Resource.create({
             "service.name": os.environ.get("OTEL_SERVICE_NAME", "coreason-veritas"),
             "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
-            "host.name": os.uname().nodename
+            "host.name": platform.node()
         })
 
         # 2. Setup Tracing (for AI workflow logic)
@@ -320,18 +354,12 @@ class IERLogger:
         _logs.set_logger_provider(lp)
         lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
 
-        # Attach to standard Python logging
-        handler = LoggingHandler(level=logging.INFO, logger_provider=lp)
-        self.logger = logging.getLogger("coreason.veritas")
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        # Configure Loguru to use OTel Sink (conceptual)
+        # configure_logging()
 
     def emit_handshake(self, version: str):
         """Standardized GxP audit trail for package initialization."""
-        self.logger.info(
-            "Veritas Engine Initialized",
-            extra={
-                "co.veritas.version": version,
-                "co.governance.status": "active"
-            }
-        )
+        logger.bind(
+            co_veritas_version=version,
+            co_governance_status="active"
+        ).info("Veritas Engine Initialized")

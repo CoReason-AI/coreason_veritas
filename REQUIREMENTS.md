@@ -43,7 +43,7 @@ class SignatureValidator:
     def __init__(self, public_key_store: str):
         self.key_store = public_key_store
 
-    def verify_asset(self, asset_payload: Dict[str, Any], signature: str) -> bool:
+    def verify_asset(self, asset_payload: Dict[str, Any], signature: str, check_timestamp: bool = True) -> bool:
         """
         1. Canonicalizes the `asset_payload` (JSON) to ensure consistent hashing.
         2. Retrieves the SRB Public Key from the immutable Key Store.
@@ -69,7 +69,8 @@ class DeterminismInterceptor:
     Acts as a proxy/hook into the LLM Client configuration.
     """
 
-    def enforce_config(self, raw_config: dict) -> dict:
+    @staticmethod
+    def enforce_config(raw_config: dict) -> dict:
         """
         The 'Lobotomy' Protocol:
         1. Forcibly sets `temperature = 0.0`.
@@ -123,9 +124,10 @@ from coreason_veritas import governed_execution
 
 @governed_execution(
     asset_id_arg="spec_id",
-    signature_arg="signature"
+    signature_arg="signature",
+    user_id_arg="user_id"
 )
-async def execute_agent_logic(spec_id: str, signature: str, input_data: dict):
+async def execute_agent_logic(spec_id: str, signature: str, user_id: str, input_data: dict):
     # 1. Gatekeeper runs first. If signature fails, this code is UNREACHABLE.
     # 2. Auditor starts the Span.
     # 3. Anchor context var is set.
@@ -137,7 +139,13 @@ async def execute_agent_logic(spec_id: str, signature: str, input_data: dict):
 ```python
 from functools import wraps
 
-def governed_execution(asset_id_arg: str, signature_arg: str):
+def governed_execution(
+    asset_id_arg: str,
+    signature_arg: str,
+    user_id_arg: str,
+    config_arg: Optional[str] = None,
+    allow_unsigned: bool = False,
+) -> Callable[..., Any]:
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):

@@ -8,9 +8,10 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import json
+from datetime import datetime, timezone
 from typing import Any, Dict
 
+import jcs
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -41,13 +42,14 @@ class SignatureValidator:
             logger.error(f"Failed to load public key: {e}")
             raise ValueError(f"Invalid public key provided: {e}") from e
 
-    def verify_asset(self, asset_payload: Dict[str, Any], signature: str) -> bool:
+    def verify_asset(self, asset_payload: Dict[str, Any], signature: str, check_timestamp: bool = True) -> bool:
         """
         Verifies the `x-coreason-sig` header against the payload hash.
 
         Args:
             asset_payload: The JSON payload to verify.
             signature: The hex-encoded signature string.
+            check_timestamp: Whether to enforce timestamp/replay protection. Defaults to True.
 
         Returns:
             bool: True if verification succeeds.
@@ -56,11 +58,32 @@ class SignatureValidator:
             AssetTamperedError: If verification fails.
         """
         try:
+            # 1. Replay Protection Check
+            if check_timestamp:
+                timestamp_str = asset_payload.get("timestamp")
+                if not timestamp_str:
+                    raise ValueError("Missing 'timestamp' in payload")
+
+                try:
+                    # ISO 8601 format expected
+                    ts = datetime.fromisoformat(str(timestamp_str))
+                    # Ensure timezone awareness (assuming UTC if not provided, or reject naive?)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except ValueError as e:
+                    raise ValueError(f"Invalid 'timestamp' format: {e}") from e
+
+                now = datetime.now(timezone.utc)
+                # Allow 5 minutes clock skew/latency
+                if abs((now - ts).total_seconds()) > 300:
+                    raise ValueError(f"Timestamp out of bounds (Replay Attack?): {ts} vs {now}")
+
+            # 2. Cryptographic Verification
             # Use pre-loaded public key
             public_key = self._public_key
 
             # Canonicalize the asset_payload (JSON) to ensure consistent hashing
-            canonical_payload = json.dumps(asset_payload, sort_keys=True).encode()
+            canonical_payload = jcs.canonicalize(asset_payload)
 
             # Verify the signature
             # The spec example uses PSS padding with MGF1 and SHA256
@@ -73,6 +96,6 @@ class SignatureValidator:
             logger.info("Asset verification successful.")
             return True
 
-        except (ValueError, TypeError, InvalidSignature, json.JSONDecodeError) as e:
+        except (ValueError, TypeError, InvalidSignature) as e:
             logger.error(f"Asset verification failed: {e}")
             raise AssetTamperedError(f"Signature verification failed: {e}") from e

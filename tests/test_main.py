@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import os
-from typing import Generator
+from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -28,6 +28,9 @@ def mock_httpx_client() -> Generator[AsyncMock, None, None]:
     """
     with patch("httpx.AsyncClient") as mock_cls:
         mock_instance = AsyncMock()
+        # Ensure build_request is synchronous (MagicMock), not async (AsyncMock)
+        # This prevents "coroutine never awaited" warnings because httpx.build_request is sync
+        mock_instance.build_request = MagicMock()
         mock_cls.return_value = mock_instance
         yield mock_instance
 
@@ -49,12 +52,23 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
     """
     # Setup mock response from upstream
     mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "id": "chatcmpl-123",
-        "choices": [{"message": {"content": "Hello world"}}],
-    }
     mock_response.status_code = 200
-    mock_httpx_client.post.return_value = mock_response
+    mock_response.headers = {"content-type": "application/json"}
+
+    # Mock aiter_bytes for streaming response
+    async def iter_bytes() -> AsyncGenerator[bytes, None]:
+        yield b'{"id": "chatcmpl-123", "choices": [{"message": {"content": "Hello world"}}]}'
+
+    mock_response.aiter_bytes.return_value = iter_bytes()
+
+    async def mock_aclose() -> None:
+        pass
+
+    mock_response.aclose = mock_aclose
+
+    # Setup send return value
+    mock_httpx_client.send.return_value = mock_response
+    mock_httpx_client.build_request.return_value = MagicMock()
 
     # User payload with "unsafe" parameters
     payload = {
@@ -70,9 +84,13 @@ def test_governed_inference_determinism_enforcement(client: TestClient, mock_htt
     assert response.status_code == 200
     assert response.json()["choices"][0]["message"]["content"] == "Hello world"
 
-    # Verify what was sent to upstream
-    mock_httpx_client.post.assert_called_once()
-    call_kwargs = mock_httpx_client.post.call_args.kwargs
+    # Verify build_request called with correct args
+    mock_httpx_client.build_request.assert_called_once()
+    call_kwargs = mock_httpx_client.build_request.call_args.kwargs
+    # If args are positional, check args[1] etc. build_request("POST", url, ...)
+    call_args = mock_httpx_client.build_request.call_args.args
+    assert call_args[0] == "POST"
+
     sent_json = call_kwargs["json"]
     sent_headers = call_kwargs["headers"]
 
@@ -99,15 +117,25 @@ def test_governed_inference_configurable_upstream(client: TestClient, mock_httpx
         assert coreason_veritas.main.LLM_PROVIDER_URL == custom_url
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {}
         mock_response.status_code = 200
-        mock_httpx_client.post.return_value = mock_response
+        mock_response.headers = {"content-type": "application/json"}
+
+        async def iter_bytes() -> AsyncGenerator[bytes, None]:
+            yield b"{}"
+
+        async def mock_aclose() -> None:
+            pass
+
+        mock_response.aiter_bytes.return_value = iter_bytes()
+        mock_response.aclose = mock_aclose
+        mock_httpx_client.send.return_value = mock_response
+        mock_httpx_client.build_request.return_value = MagicMock()
 
         client.post("/v1/chat/completions", json={"model": "test"})
 
-        # Verify URL
-        args, _ = mock_httpx_client.post.call_args
-        assert args[0] == custom_url
+        # Verify URL passed to build_request
+        args = mock_httpx_client.build_request.call_args.args
+        assert args[1] == custom_url
 
 
 def test_run_server_configuration() -> None:
@@ -129,13 +157,23 @@ def test_governed_inference_missing_auth_header(client: TestClient, mock_httpx_c
     Test that the gateway works even if no Authorization header is present (public endpoint scenario).
     """
     mock_response = MagicMock()
-    mock_response.json.return_value = {}
     mock_response.status_code = 200
-    mock_httpx_client.post.return_value = mock_response
+    mock_response.headers = {"content-type": "application/json"}
+
+    async def iter_bytes() -> AsyncGenerator[bytes, None]:
+        yield b"{}"
+
+    async def mock_aclose() -> None:
+        pass
+
+    mock_response.aiter_bytes.return_value = iter_bytes()
+    mock_response.aclose = mock_aclose
+    mock_httpx_client.send.return_value = mock_response
+    mock_httpx_client.build_request.return_value = MagicMock()
 
     client.post("/v1/chat/completions", json={"model": "test"})
 
-    call_kwargs = mock_httpx_client.post.call_args.kwargs
+    call_kwargs = mock_httpx_client.build_request.call_args.kwargs
     sent_headers = call_kwargs["headers"]
     assert "Authorization" not in sent_headers
 
@@ -145,21 +183,35 @@ def test_governed_inference_upstream_error(client: TestClient, mock_httpx_client
     Test that the gateway propagates upstream errors (e.g. 500) correctly.
     """
     mock_response = MagicMock()
-    mock_response.json.return_value = {"error": "Internal Server Error"}
     mock_response.status_code = 500
-    mock_httpx_client.post.return_value = mock_response
+    mock_response.headers = {"content-type": "application/json"}
+
+    async def iter_bytes() -> AsyncGenerator[bytes, None]:
+        yield b'{"error": "Internal Server Error"}'
+
+    async def mock_aclose() -> None:
+        pass
+
+    mock_response.aiter_bytes.return_value = iter_bytes()
+    mock_response.aclose = mock_aclose
+    mock_httpx_client.send.return_value = mock_response
+    mock_httpx_client.build_request.return_value = MagicMock()
 
     response = client.post("/v1/chat/completions", json={"model": "test"})
 
     # Check that we get the error body back
     assert response.json() == {"error": "Internal Server Error"}
 
+    # Ensure the background task (aclose) is executed or mocked properly to avoid warnings
+    # The warning comes because TestClient might not be fully draining background tasks with the mock
+
 
 def test_governed_inference_upstream_timeout(client: TestClient, mock_httpx_client: AsyncMock) -> None:
     """
     Test handling of upstream timeout.
     """
-    mock_httpx_client.post.side_effect = httpx.ReadTimeout("Timeout")
+    mock_httpx_client.build_request.return_value = MagicMock()
+    mock_httpx_client.send.side_effect = httpx.ReadTimeout("Timeout")
 
     with pytest.raises(httpx.ReadTimeout):
         client.post("/v1/chat/completions", json={"model": "test"})

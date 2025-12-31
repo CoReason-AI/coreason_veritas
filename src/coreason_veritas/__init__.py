@@ -12,15 +12,16 @@
 coreason_veritas is the non-negotiable governance layer of the CoReason platform
 """
 
-import logging
 import os
+
+from loguru import logger
 
 from .anchor import DeterminismInterceptor
 from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
 from .wrapper import governed_execution
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
@@ -37,4 +38,4 @@ def initialize() -> None:
             _auditor = IERLogger()
             _auditor.emit_handshake(__version__)
         except Exception as e:
-            logging.getLogger("coreason.veritas").error(f"MACO Audit Link Failed: {e}")
+            logger.error(f"MACO Audit Link Failed: {e}")

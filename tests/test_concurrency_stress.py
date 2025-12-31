@@ -9,12 +9,13 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import json
 import os
 import random
+from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -42,7 +43,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -64,7 +65,7 @@ async def test_concurrency_stress_test(key_pair: Tuple[RSAPrivateKey, str]) -> N
     NUM_TASKS = 200
 
     # Prepare governed payload
-    payload = {"data": "stress_test"}
+    payload = {"data": "stress_test", "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -73,7 +74,7 @@ async def test_concurrency_stress_test(key_pair: Tuple[RSAPrivateKey, str]) -> N
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+            mock_tracer.start_span.return_value = mock_span
 
             # Define Governed Task
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
