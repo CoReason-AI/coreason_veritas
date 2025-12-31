@@ -60,8 +60,6 @@ For deeper integration, the `DeterminismInterceptor` can be used to manually san
 ```python
 from coreason_veritas.anchor import DeterminismInterceptor
 
-interceptor = DeterminismInterceptor()
-
 # An unsafe config that might produce hallucinations
 risky_config = {
     "model": "gpt-4",
@@ -70,7 +68,7 @@ risky_config = {
 }
 
 # The interceptor forcibly overrides stochastic params
-safe_config = interceptor.enforce_config(risky_config)
+safe_config = DeterminismInterceptor.enforce_config(risky_config)
 
 # Result: {'model': 'gpt-4', 'temperature': 0.0, 'seed': 42, ...}
 ```

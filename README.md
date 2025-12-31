@@ -68,8 +68,6 @@ For developers integrating directly with LLM clients (like OpenAI or Anthropic),
 ```python
 from coreason_veritas.anchor import DeterminismInterceptor
 
-interceptor = DeterminismInterceptor()
-
 # An unsafe config that might produce hallucinations (high temp, random seed)
 risky_config = {
     "model": "gpt-4",
@@ -79,7 +77,7 @@ risky_config = {
 }
 
 # The interceptor forcibly overrides stochastic params
-safe_config = interceptor.enforce_config(risky_config)
+safe_config = DeterminismInterceptor.enforce_config(risky_config)
 
 print(safe_config)
 # Output:
