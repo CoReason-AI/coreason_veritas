@@ -11,18 +11,19 @@
 import inspect
 import os
 import time
-from functools import lru_cache, wraps
+from functools import wraps
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from loguru import logger
+from opentelemetry import context, trace
 
+import coreason_veritas.anchor
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import SignatureValidator
 from coreason_veritas.logging_utils import scrub_sensitive_data
 
 
-@lru_cache(maxsize=1)
 def get_public_key_from_store() -> str:
     """
     Retrieves the SRB Public Key from the immutable Key Store.
@@ -139,6 +140,7 @@ def governed_execution(
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 start_time = time.perf_counter()
+                attributes: Dict[str, str] = {}
                 try:
                     attributes, bound = _prepare_governance(
                         func,
@@ -152,18 +154,42 @@ def governed_execution(
                     )
                     log_start(attributes, bound)
 
-                    with IERLogger().start_governed_span(func.__name__, attributes):
-                        with DeterminismInterceptor.scope():
+                    # Manually handle span and context to support async generator cancellation
+                    ier_logger = IERLogger()
+                    span = ier_logger.create_governed_span(func.__name__, attributes)
+
+                    # Activate context
+                    ctx = trace.set_span_in_context(span)
+                    token_otel = context.attach(ctx)
+
+                    try:
+                        # Activate Anchor
+                        token_anchor = coreason_veritas.anchor._ANCHOR_ACTIVE.set(True)
+                        try:
                             async for item in func(*bound.args, **bound.kwargs):
                                 yield item
+                        finally:
+                            try:
+                                coreason_veritas.anchor._ANCHOR_ACTIVE.reset(token_anchor)
+                            except ValueError:  # pragma: no cover
+                                # Context diverged, ignore
+                                pass  # pragma: no cover
+                    finally:
+                        try:
+                            context.detach(token_otel)
+                        except BaseException:  # pragma: no cover
+                            # Context diverged, ignore
+                            pass  # pragma: no cover
+
+                        span.end()
 
                     log_end(attributes, start_time, success=True)
 
                 except Exception as e:
                     # If attributes is not defined (prepare governance failed), we try to get what we can
                     # but typically we just log error.
-                    if "attributes" not in locals():
-                        attributes = {"co.error": "PrepareGovernanceFailed"}  # pragma: no cover
+                    if not attributes:
+                        attributes = {"co.error": "PrepareGovernanceFailed"}
 
                     logger.bind(**attributes).exception(f"Governance Execution Failed: {e}")
                     log_end(attributes, start_time, success=False)

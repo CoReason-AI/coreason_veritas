@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.exceptions import AssetTamperedError
-from coreason_veritas.wrapper import get_public_key_from_store, governed_execution
+from coreason_veritas.wrapper import governed_execution
 
 # --- Fixtures & Helpers ---
 
@@ -188,14 +188,15 @@ async def test_generator_interruption_cleanup(key_pair: Tuple[RSAPrivateKey, str
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with (
             patch("coreason_veritas.wrapper.IERLogger") as MockIERLogger,
-            patch("coreason_veritas.wrapper.DeterminismInterceptor") as MockAnchor,
+            patch("coreason_veritas.anchor._ANCHOR_ACTIVE") as MockAnchorVar,
         ):
-            mock_span_ctx = MagicMock()
-            MockIERLogger.return_value.start_governed_span.return_value = mock_span_ctx
+            mock_span = MagicMock()
+            # For async generator, we use create_governed_span and manual span.end()
+            MockIERLogger.return_value.create_governed_span.return_value = mock_span
 
-            mock_anchor_ctx = MagicMock()
-            # Updated to mock the static method, not the instance method
-            MockAnchor.scope.return_value = mock_anchor_ctx
+            # For Anchor, we use manual set/reset on _ANCHOR_ACTIVE contextvar
+            mock_token = MagicMock()
+            MockAnchorVar.set.return_value = mock_token
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def stream_data(spec: Dict[str, Any], sig: str, user: str) -> AsyncGenerator[int, None]:
@@ -217,11 +218,11 @@ async def test_generator_interruption_cleanup(key_pair: Tuple[RSAPrivateKey, str
                 await gen.aclose()
 
             # Verification
-            # Check if IERLogger span was exited
-            mock_span_ctx.__exit__.assert_called_once()
+            # Check if span.end() was called (manual management)
+            mock_span.end.assert_called_once()
 
-            # Check if Anchor scope was exited
-            mock_anchor_ctx.__exit__.assert_called_once()
+            # Check if Anchor was reset
+            MockAnchorVar.reset.assert_called_with(mock_token)
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -256,7 +257,6 @@ async def test_dynamic_key_rotation(key_pair: Tuple[RSAPrivateKey, str]) -> None
 
         # 1. Start with Key A
         with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": pub_a}):
-            get_public_key_from_store.cache_clear()
             # A should pass
             assert await protected_op(spec=payload, sig=sig_a, user="u") == "success"
             # B should fail
@@ -265,7 +265,6 @@ async def test_dynamic_key_rotation(key_pair: Tuple[RSAPrivateKey, str]) -> None
 
         # 2. Rotate to Key B
         with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": pub_b}):
-            get_public_key_from_store.cache_clear()
             # B should pass now
             assert await protected_op(spec=payload, sig=sig_b, user="u") == "success"
             # A should fail now
