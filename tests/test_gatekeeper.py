@@ -9,8 +9,10 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Tuple
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -38,7 +40,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -50,7 +52,8 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
 def test_verify_asset_success(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test successful verification of a valid signature."""
     private_key, public_key_pem = key_pair
-    payload = {"agent": "veritas", "version": 1}
+    # Add timestamp for replay protection
+    payload = {"agent": "veritas", "version": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     validator = SignatureValidator(public_key_pem)
@@ -60,11 +63,11 @@ def test_verify_asset_success(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 def test_verify_asset_tampered_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification fails when payload is modified."""
     private_key, public_key_pem = key_pair
-    payload = {"agent": "veritas", "version": 1}
+    payload = {"agent": "veritas", "version": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
-    # Modify payload
-    tampered_payload = {"agent": "veritas", "version": 2}
+    # Modify payload (timestamp also matches but other fields tampered)
+    tampered_payload = {"agent": "veritas", "version": 2, "timestamp": payload["timestamp"]}
 
     validator = SignatureValidator(public_key_pem)
     with pytest.raises(AssetTamperedError) as excinfo:
@@ -75,7 +78,7 @@ def test_verify_asset_tampered_payload(key_pair: Tuple[RSAPrivateKey, str]) -> N
 def test_verify_asset_invalid_signature(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification fails with an invalid signature string."""
     _, public_key_pem = key_pair
-    payload = {"agent": "veritas"}
+    payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
 
     validator = SignatureValidator(public_key_pem)
     with pytest.raises(AssetTamperedError):
@@ -93,7 +96,7 @@ def test_verify_asset_wrong_key(key_pair: Tuple[RSAPrivateKey, str]) -> None:
         key_size=2048,
     )
 
-    payload = {"agent": "veritas"}
+    payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
     # Signed with Key 2
     signature = sign_payload(payload, private_key_2)
 
@@ -127,6 +130,7 @@ def test_verify_asset_complex_nested_payload(key_pair: Tuple[RSAPrivateKey, str]
             ],
         },
         "metadata": {"version": 2, "tags": ["gxp", "audit"], "extra": None},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     signature = sign_payload(payload, private_key)
@@ -144,14 +148,16 @@ def test_verify_asset_complex_nested_payload(key_pair: Tuple[RSAPrivateKey, str]
     payload_reordered["metadata"] = payload["metadata"]
     payload_reordered["agent"] = payload["agent"]
     payload_reordered["config"] = payload["config"]
+    payload_reordered["timestamp"] = payload["timestamp"]
 
     assert validator.verify_asset(payload_reordered, signature) is True
 
 
 def test_verify_asset_empty_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None:
-    """Test verification of an empty dictionary payload."""
+    """Test verification of an empty dictionary payload (plus timestamp)."""
     private_key, public_key_pem = key_pair
-    payload: Dict[str, Any] = {}
+    # Even 'empty' payload requires timestamp for replay protection
+    payload = {"timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     validator = SignatureValidator(public_key_pem)
@@ -161,7 +167,7 @@ def test_verify_asset_empty_payload(key_pair: Tuple[RSAPrivateKey, str]) -> None
 def test_verify_asset_none_values(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification of a payload containing None values."""
     private_key, public_key_pem = key_pair
-    payload = {"key": None, "nested": {"inner": None}}
+    payload = {"key": None, "nested": {"inner": None}, "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     validator = SignatureValidator(public_key_pem)
@@ -171,7 +177,7 @@ def test_verify_asset_none_values(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 def test_verify_asset_whitespace_key(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification with a public key containing extra whitespace."""
     private_key, public_key_pem = key_pair
-    payload = {"agent": "veritas"}
+    payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
     signature = sign_payload(payload, private_key)
 
     # Add extra newlines and spaces to the key
@@ -183,7 +189,7 @@ def test_verify_asset_whitespace_key(key_pair: Tuple[RSAPrivateKey, str]) -> Non
 def test_verify_asset_malformed_signature_odd_length(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification fails with an odd-length hex signature."""
     _, public_key_pem = key_pair
-    payload = {"agent": "veritas"}
+    payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
 
     validator = SignatureValidator(public_key_pem)
     # Hex strings must be even length
@@ -195,9 +201,44 @@ def test_verify_asset_malformed_signature_odd_length(key_pair: Tuple[RSAPrivateK
 def test_verify_asset_malformed_signature_non_hex(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test verification fails with non-hex characters in signature."""
     _, public_key_pem = key_pair
-    payload = {"agent": "veritas"}
+    payload = {"agent": "veritas", "timestamp": datetime.now(timezone.utc).isoformat()}
 
     validator = SignatureValidator(public_key_pem)
     with pytest.raises(AssetTamperedError) as excinfo:
         validator.verify_asset(payload, "zzzz")
     assert "Signature verification failed" in str(excinfo.value)
+
+
+def test_verify_asset_replay_missing_timestamp(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure when timestamp is missing."""
+    private_key, public_key_pem = key_pair
+    payload = {"agent": "veritas"}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    with pytest.raises(AssetTamperedError, match="Missing 'timestamp' in payload"):
+        validator.verify_asset(payload, signature)
+
+
+def test_verify_asset_replay_old_timestamp(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure when timestamp is too old."""
+    private_key, public_key_pem = key_pair
+    old_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+    payload = {"agent": "veritas", "timestamp": old_time.isoformat()}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    with pytest.raises(AssetTamperedError, match="Timestamp out of bounds"):
+        validator.verify_asset(payload, signature)
+
+
+def test_verify_asset_replay_future_timestamp(key_pair: Tuple[RSAPrivateKey, str]) -> None:
+    """Test failure when timestamp is too far in future."""
+    private_key, public_key_pem = key_pair
+    future_time = datetime.now(timezone.utc) + timedelta(minutes=10)
+    payload = {"agent": "veritas", "timestamp": future_time.isoformat()}
+    signature = sign_payload(payload, private_key)
+
+    validator = SignatureValidator(public_key_pem)
+    with pytest.raises(AssetTamperedError, match="Timestamp out of bounds"):
+        validator.verify_asset(payload, signature)

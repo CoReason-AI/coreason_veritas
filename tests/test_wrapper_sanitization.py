@@ -10,9 +10,11 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, Generator, Tuple
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -33,7 +35,7 @@ def mock_keys() -> Tuple[RSAPrivateKey, str]:
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -47,9 +49,10 @@ def mock_env(mock_keys: Tuple[RSAPrivateKey, str]) -> Generator[RSAPrivateKey, N
     private_key, pem_public = mock_keys
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": pem_public}):
         with patch("coreason_veritas.wrapper.IERLogger") as mock_logger:
-            # Mock Logger
+            # Mock Logger (Updated for GovernanceContext usage)
             mock_span = MagicMock()
-            mock_logger.return_value.start_governed_span.return_value.__enter__.return_value = mock_span
+            # This is tricky because GovernanceContext calls create_governed_span directly on instance
+            mock_logger.return_value.create_governed_span.return_value = mock_span
             yield private_key
 
 
@@ -58,7 +61,7 @@ async def test_wrapper_sanitization_async(mock_env: RSAPrivateKey) -> None:
     """Test sanitization in async function."""
     private_key = mock_env
     unsafe_config = {"temperature": 0.9, "top_p": 0.5, "seed": 123}
-    spec = {"id": "1"}
+    spec = {"id": "1", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(spec, private_key)
 
     @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
@@ -78,7 +81,7 @@ def test_wrapper_sanitization_sync(mock_env: RSAPrivateKey) -> None:
     """Test sanitization in sync function."""
     private_key = mock_env
     unsafe_config = {"temperature": 0.9}
-    spec = {"id": "1"}
+    spec = {"id": "1", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(spec, private_key)
 
     @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
@@ -95,7 +98,7 @@ async def test_wrapper_sanitization_async_gen(mock_env: RSAPrivateKey) -> None:
     """Test sanitization in async generator."""
     private_key = mock_env
     unsafe_config = {"temperature": 0.9}
-    spec = {"id": "1"}
+    spec = {"id": "1", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(spec, private_key)
 
     @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")
@@ -112,7 +115,7 @@ def test_wrapper_sanitization_sync_gen(mock_env: RSAPrivateKey) -> None:
     """Test sanitization in sync generator."""
     private_key = mock_env
     unsafe_config = {"temperature": 0.9}
-    spec = {"id": "1"}
+    spec = {"id": "1", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(spec, private_key)
 
     @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user", config_arg="config")

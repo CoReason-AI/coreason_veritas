@@ -2,9 +2,11 @@ import concurrent.futures
 import json
 import os
 import threading
+from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
 
+import jcs
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -25,7 +27,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
 
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
-    canonical_payload = json.dumps(payload, sort_keys=True).encode()
+    canonical_payload = jcs.canonicalize(payload)
     signature = private_key.sign(
         canonical_payload,
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
@@ -37,14 +39,14 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
 def test_threaded_sync_execution(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test that governed synchronous functions work correctly in multiple threads."""
     private_key, public_key_pem = key_pair
-    payload = {"data": "thread"}
+    payload = {"data": "thread", "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def work(spec: Dict[str, Any], sig: str, user: str) -> int:
@@ -69,14 +71,14 @@ async def test_mixed_nesting_sync_calls_async(key_pair: Tuple[RSAPrivateKey, str
     (needs special handling by caller, but verifies wrapper compatibility).
     """
     private_key, public_key_pem = key_pair
-    payload = {"d": 1}
+    payload = {"d": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def inner_async(spec: Dict[str, Any], sig: str, user: str) -> str:
@@ -106,7 +108,7 @@ def test_evil_str_attribute(key_pair: Tuple[RSAPrivateKey, str]) -> None:
         def __str__(self) -> str:
             raise ValueError("I am evil")
 
-    payload = {"d": 1}
+    payload = {"d": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
@@ -125,14 +127,14 @@ def test_evil_str_attribute(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 def test_governed_sync_generator(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test governance of synchronous generators."""
     private_key, public_key_pem = key_pair
-    payload = {"d": 1}
+    payload = {"d": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             def my_gen(spec: Dict[str, Any], sig: str, user: str) -> Any:
@@ -153,14 +155,14 @@ def test_governed_sync_generator(key_pair: Tuple[RSAPrivateKey, str]) -> None:
 async def test_governed_async_generator(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """Test governance of asynchronous generators."""
     private_key, public_key_pem = key_pair
-    payload = {"d": 1}
+    payload = {"d": 1, "timestamp": datetime.now(timezone.utc).isoformat()}
     sig = sign_payload(payload, private_key)
 
     with patch.dict(os.environ, {"COREASON_VERITAS_PUBLIC_KEY": public_key_pem}):
         with patch("coreason_veritas.auditor.trace.get_tracer") as mock_get_tracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
-            mock_tracer.start_as_current_span.return_value.__enter__.return_value = MagicMock()
+            mock_tracer.start_span.return_value = MagicMock()
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def my_agen(spec: Dict[str, Any], sig: str, user: str) -> Any:
