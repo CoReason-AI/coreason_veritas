@@ -7,7 +7,7 @@ This guide is for System Operators, Auditors, and Compliance Officers responsibl
 ### Deployment Mode A: Library Injection
 
 *   **Integration:** Used in `services.project_lock` and `integrations.asset_registry`.
-*   **Lifecycle:** Auto-initializes `IERLogger` in `__init__.py`.
+*   **Lifecycle:** Requires explicit initialization via `coreason_veritas.initialize()`.
 
 ### Deployment Mode B: Gateway Proxy
 
@@ -17,7 +17,7 @@ For environments where Python library injection is not feasible, `coreason_verit
 *   **Framework:** FastAPI + Uvicorn.
 *   **Endpoints:** Exposes `POST /v1/chat/completions`.
 *   **Behavior:**
-    1.  **Anchor:** Intercepts request -> Sanitizes config (Temp=0, Seed=42).
+    1.  **Anchor:** Intercepts request -> Sanitizes config (Temp=0, Seed=42 (or ENV)).
     2.  **Proxy:** Forwards to LLM Provider -> Returns response.
 *   **Configuration:**
     *   `VERITAS_HOST`: Host to bind (default: `0.0.0.0`).
@@ -36,7 +36,7 @@ Every "Governed" span will contain the following attributes. These attributes ar
 | :--- | :--- | :--- |
 | `co.user_id` | The identity of the human or system invoking the agent. | `user_1234` |
 | `co.asset_id` | A unique identifier for the logic being executed. | `spec_clinical_v2` |
-| `co.srb_sig` | The cryptographic signature proving authorization. | `a1b2c3d4...` |
+| `co.srb_sig` | The cryptographic signature proving authorization. (Optional in **Draft Mode**) | `a1b2c3d4...` |
 | `co.determinism_verified` | Boolean confirming "Lobotomy Protocol" status. | `true` |
 
 ### Reading the Traces

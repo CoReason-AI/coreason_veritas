@@ -88,7 +88,7 @@ print(safe_config)
 #   "model": "gpt-4",
 #   "temperature": 0.0,  <-- Sanitized
 #   "top_p": 1.0,        <-- Sanitized
-#   "seed": 42           <-- Injected
+#   "seed": 42           <-- Injected (Configurable via VERITAS_SEED)
 # }
 ```
 
