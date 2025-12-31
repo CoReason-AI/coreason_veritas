@@ -398,9 +398,10 @@ def test_ier_logger_production_mode_instantiation(
 
             from opentelemetry.trace import ProxyTracerProvider
 
-            with patch(
+            tracer_provider_mock = patch(
                 "coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()
-            ):
+            )
+            with tracer_provider_mock:
                 IERLogger()
 
                 # Verify real exporters were instantiated

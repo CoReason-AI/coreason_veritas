@@ -106,14 +106,13 @@ def test_auditor_init_tracer_provider_failure() -> None:
     from opentelemetry.trace import ProxyTracerProvider
 
     with patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()):
-        with patch(
-            "coreason_veritas.auditor.trace.set_tracer_provider", side_effect=Exception("Provider exists")
-        ):
+        with patch("coreason_veritas.auditor.trace.set_tracer_provider", side_effect=Exception("Provider exists")):
             pass
 
-    with patch(
+    logger_provider_mock = patch(
         "coreason_veritas.auditor._logs.set_logger_provider", side_effect=Exception("Logger Provider exists")
-    ):
+    )
+    with logger_provider_mock:
         with patch("coreason_veritas.auditor.logger.warning") as mock_warning:
             _ = IERLogger()
             mock_warning.assert_called()
