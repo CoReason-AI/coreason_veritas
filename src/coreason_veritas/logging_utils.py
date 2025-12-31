@@ -42,7 +42,7 @@ def scrub_sensitive_data(
     data: Any,
     depth: int = 0,
     max_depth: int = 20,
-    seen: Optional[Dict[int, Any]] = None,
+    ancestors: Optional[set[int]] = None,
 ) -> Any:
     """
     Recursively scrubs sensitive keys from dictionaries and lists.
@@ -50,12 +50,12 @@ def scrub_sensitive_data(
 
     Features:
     - Recursion depth limit (defaults to 20)
-    - Circular reference detection
+    - Circular reference detection (tracks ancestors in current stack)
     - Set conversion to list
     - Custom object handling (via string representation)
     """
-    if seen is None:
-        seen = {}
+    if ancestors is None:
+        ancestors = set()
 
     # Check max depth
     if depth > max_depth:
@@ -63,12 +63,14 @@ def scrub_sensitive_data(
 
     # Check circular reference
     obj_id = id(data)
-    if obj_id in seen:
+    if obj_id in ancestors:
         return "[CIRCULAR_REF]"
 
+    # Track current object in ancestors for recursion
     # We only track container types for circular reference
+    new_ancestors = ancestors
     if isinstance(data, (dict, list, tuple, set)):
-        seen[obj_id] = data
+        new_ancestors = ancestors | {obj_id}
 
     if isinstance(data, dict):
         new_dict = {}
@@ -76,15 +78,15 @@ def scrub_sensitive_data(
             if isinstance(k, str) and k.lower() in SENSITIVE_KEYS:
                 new_dict[k] = "[REDACTED]"
             else:
-                new_dict[k] = scrub_sensitive_data(v, depth + 1, max_depth, seen)
+                new_dict[k] = scrub_sensitive_data(v, depth + 1, max_depth, new_ancestors)
         return new_dict
 
     if isinstance(data, (list, tuple)):
-        scrubbed = [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
+        scrubbed = [scrub_sensitive_data(item, depth + 1, max_depth, new_ancestors) for item in data]
         return tuple(scrubbed) if isinstance(data, tuple) else scrubbed
 
     if isinstance(data, set):
-        scrubbed_list = [scrub_sensitive_data(item, depth + 1, max_depth, seen) for item in data]
+        scrubbed_list = [scrub_sensitive_data(item, depth + 1, max_depth, new_ancestors) for item in data]
         try:
             return sorted(scrubbed_list)
         except TypeError:
