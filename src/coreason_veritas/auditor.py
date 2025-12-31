@@ -95,18 +95,14 @@ class IERLogger:
                 tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
 
             trace.set_tracer_provider(tp)
-        else:
-            logger.info("TracerProvider already set. Skipping initialization.")
 
+        # Always get the tracer (even if provider was already set externally)
         self.tracer = trace.get_tracer("veritas.audit")
 
         # Logging Setup
-        # Only set global LoggerProvider if it's not already set (checking logic is similar)
-        # Note: OpenTelemetry Python API doesn't expose a ProxyLoggerProvider directly in the same way for types,
-        # but for now we assume similar behavior or just force set it if we can.
-        # Actually _logs.get_logger_provider() returns a ProxyLoggerProvider if not set.
+        # Only set global LoggerProvider if it's not already set.
+        # We rely on OTel's internal check or catching the error.
 
-        # We will attempt to set it.
         lp = LoggerProvider(resource=resource)
         if os.environ.get("COREASON_VERITAS_TEST_MODE"):
             lp.add_log_record_processor(SimpleLogRecordProcessor(ConsoleLogRecordExporter()))
@@ -115,8 +111,9 @@ class IERLogger:
 
         try:
             _logs.set_logger_provider(lp)
-        except Exception as e:
-            logger.warning(f"Failed to set LoggerProvider (might be already set): {e}")
+        except Exception:
+            # LoggerProvider already set, which is fine.
+            pass
 
         configure_logging()
 

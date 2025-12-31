@@ -115,7 +115,8 @@ def test_auditor_init_tracer_provider_failure() -> None:
     with logger_provider_mock:
         with patch("coreason_veritas.auditor.logger.warning") as mock_warning:
             _ = IERLogger()
-            mock_warning.assert_called()
+            # We now suppress this error silently as it's a common/benign case
+            mock_warning.assert_not_called()
 
 
 # --- Wrapper Coverage ---
