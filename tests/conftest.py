@@ -8,7 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Generator, cast
 from unittest.mock import patch
 
 import jcs
@@ -53,24 +53,28 @@ def reset_singleton() -> Generator[None, None, None]:
 # --- Shared Crypto Fixtures (Moved from edge_cases) ---
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session")  # type: ignore[misc]
 def private_key() -> rsa.RSAPrivateKey:
     return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session")  # type: ignore[misc]
 def public_key(private_key: rsa.RSAPrivateKey) -> rsa.RSAPublicKey:
     return private_key.public_key()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session")  # type: ignore[misc]
 def pem_public(public_key: rsa.RSAPublicKey) -> str:
-    return public_key.public_bytes(
-        encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode("utf-8")
+    # Use explicit type casting to string
+    return cast(
+        str,
+        public_key.public_bytes(
+            encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode("utf-8"),
+    )
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore[misc]
 def sign_payload_func(private_key: rsa.RSAPrivateKey) -> Callable[..., str]:
     def _sign(payload: Any, p_key: Any = None) -> str:
         key_to_use = p_key or private_key
@@ -80,6 +84,6 @@ def sign_payload_func(private_key: rsa.RSAPrivateKey) -> Callable[..., str]:
             padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
             hashes.SHA256(),
         )
-        return signature.hex()
+        return cast(str, signature.hex())
 
     return _sign

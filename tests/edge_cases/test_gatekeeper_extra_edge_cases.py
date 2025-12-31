@@ -129,7 +129,7 @@ def test_verify_asset_naive_timestamp_assumed_utc(
     """Test that naive timestamp is assumed UTC and accepted if within range."""
     validator = SignatureValidator(pem_public)
     # create naive datetime representing now (UTC)
-    naive_now = datetime.utcnow()  # type: ignore[deprecated]
+    naive_now = datetime.utcnow()
     payload: Dict[str, Any] = {"data": "test", "timestamp": naive_now.isoformat()}
     sig = sign_payload_func(payload)
 

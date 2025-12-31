@@ -54,7 +54,7 @@ def test_governed_execution_missing_arguments_in_call() -> None:
 
     # Missing sig and user
     with pytest.raises(TypeError):  # Python raises TypeError for missing args
-        my_func(spec={})  # type: ignore[call-arg]
+        my_func(spec={})
 
 
 def test_governed_execution_incorrect_argument_names(sign_payload_func: Callable[[Dict[str, Any]], str]) -> None:
