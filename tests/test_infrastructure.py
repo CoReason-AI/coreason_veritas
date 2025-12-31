@@ -11,7 +11,6 @@
 import pytest
 from cryptography.hazmat.primitives import hashes
 from opentelemetry import trace
-from pydantic import BaseModel
 
 from coreason_veritas.exceptions import AssetTamperedError
 
@@ -20,7 +19,6 @@ def test_dependencies_installed() -> None:
     """Verify that all added dependencies are importable."""
     assert hashes.SHA256
     assert trace.get_tracer
-    assert BaseModel
 
 
 def test_exception_import() -> None:

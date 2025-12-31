@@ -48,6 +48,12 @@ def scrub_sensitive_data(
     Recursively scrubs sensitive keys from dictionaries and lists.
     Returns a new structure with redacted values.
 
+    Why Custom Implementation?
+    Standard libraries (like logging or json) or even OTel SDKs do not inherently provide
+    deep recursive scrubbing with circular reference detection and specific key redaction
+    out of the box without significant overhead or additional heavy dependencies.
+    This lightweight implementation ensures safe logging of arbitrary data structures.
+
     Features:
     - Recursion depth limit (defaults to 20)
     - Circular reference detection (tracks ancestors in current stack)
