@@ -8,10 +8,13 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-from typing import Generator
+from typing import Any, Callable, Generator, cast
 from unittest.mock import patch
 
+import jcs
 import pytest
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from coreason_veritas.auditor import IERLogger
 
@@ -45,3 +48,42 @@ def reset_singleton() -> Generator[None, None, None]:
         IERLogger.reset()
     else:
         IERLogger._instance = None
+
+
+# --- Shared Crypto Fixtures (Moved from edge_cases) ---
+
+
+@pytest.fixture(scope="session")  # type: ignore[misc]
+def private_key() -> rsa.RSAPrivateKey:
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+@pytest.fixture(scope="session")  # type: ignore[misc]
+def public_key(private_key: rsa.RSAPrivateKey) -> rsa.RSAPublicKey:
+    return private_key.public_key()
+
+
+@pytest.fixture(scope="session")  # type: ignore[misc]
+def pem_public(public_key: rsa.RSAPublicKey) -> str:
+    # Use explicit type casting to string
+    return cast(
+        str,
+        public_key.public_bytes(
+            encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode("utf-8"),
+    )
+
+
+@pytest.fixture  # type: ignore[misc]
+def sign_payload_func(private_key: rsa.RSAPrivateKey) -> Callable[..., str]:
+    def _sign(payload: Any, p_key: Any = None) -> str:
+        key_to_use = p_key or private_key
+        canonical = jcs.canonicalize(payload)
+        signature = key_to_use.sign(
+            canonical,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256(),
+        )
+        return cast(str, signature.hex())
+
+    return _sign
