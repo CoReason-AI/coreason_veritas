@@ -37,12 +37,12 @@ from coreason_veritas.anchor import DeterminismInterceptor
 
 # 1. Sanitize Config
 unsafe_config = {"temperature": 0.7, "model": "gpt-4"}
-interceptor = DeterminismInterceptor()
-safe_config = interceptor.enforce_config(unsafe_config)
+# DeterminismInterceptor methods are static
+safe_config = DeterminismInterceptor.enforce_config(unsafe_config)
 # safe_config is now {"temperature": 0.0, "seed": 42, ...}
 
 # 2. Run in Scope
-with interceptor.scope():
+with DeterminismInterceptor.scope():
     # External calls here will detect the anchor
     print("I am anchored.")
 ```
