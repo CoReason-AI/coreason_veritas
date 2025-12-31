@@ -46,6 +46,10 @@ class IERLogger:
 
     _instance: Optional["IERLogger"] = None
 
+    _service_name: str
+    _sinks: List[Callable[[Dict[str, Any]], None]]
+    tracer: trace.Tracer
+
     def __new__(cls, service_name: str = "coreason-veritas") -> "IERLogger":
         if cls._instance is not None:
             if cls._instance._service_name != service_name:
@@ -58,7 +62,7 @@ class IERLogger:
         self = super(IERLogger, cls).__new__(cls)
         self._service_name = service_name
         self._initialize_providers()
-        self._sinks: List[Callable[[Dict[str, Any]], None]] = []
+        self._sinks = []
 
         cls._instance = self
         return self

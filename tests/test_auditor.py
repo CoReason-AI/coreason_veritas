@@ -108,6 +108,14 @@ def test_ier_logger_singleton(
         mock_set_lp.assert_called_once()
 
 
+def test_ier_logger_attributes() -> None:
+    """Test that IERLogger has required attributes."""
+    logger = IERLogger()
+    assert hasattr(logger, "_service_name")
+    assert hasattr(logger, "_sinks")
+    assert hasattr(logger, "tracer")
+
+
 def test_emit_handshake(mock_exporters: None, mock_tracer: MagicMock) -> None:
     """Test emit_handshake logs correct message."""
     logger_instance = IERLogger("test-service")
@@ -343,7 +351,6 @@ def test_ier_logger_reinitialization_warning(caplog: Any) -> None:
     """Test that re-initializing IERLogger with different service name logs a warning."""
     # Reset singleton
     IERLogger._instance = None
-    IERLogger._initialized = False
 
     with (
         patch("coreason_veritas.auditor.trace.set_tracer_provider"),
@@ -389,27 +396,11 @@ def test_ier_logger_production_mode_instantiation(
             # Reset singleton to force re-init
             IERLogger.reset()
 
-            # We need to ensure that get_tracer_provider returns a ProxyTracerProvider
-            # so that _initialize_providers proceeds.
-            # However, `trace.get_tracer_provider` is imported as `trace` in the module?
-            # No, `from opentelemetry import _logs, trace`
-
-            # In the code:
-            # if isinstance(trace.get_tracer_provider(), ProxyTracerProvider):
-
-            # So we need to mock trace.get_tracer_provider to return a ProxyTracerProvider instance
-            # OR we can rely on the fact that by default it returns a ProxyTracerProvider
-            # The issue in the previous run was likely that `trace.get_tracer_provider()` returned a Mock (or real provider)
-            # that was NOT an instance of ProxyTracerProvider because of the `mock_tracer_provider` fixture
-            # or some other patching.
-
-            # Actually, the `mock_tracer_provider` fixture patches `TracerProvider` class, not `trace.get_tracer_provider`
-            # function.
-
-            # We need to make sure `trace.get_tracer_provider()` returns an instance of ProxyTracerProvider
             from opentelemetry.trace import ProxyTracerProvider
 
-            with patch("coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()):
+            with patch(
+                "coreason_veritas.auditor.trace.get_tracer_provider", return_value=ProxyTracerProvider()
+            ):
                 IERLogger()
 
                 # Verify real exporters were instantiated

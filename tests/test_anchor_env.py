@@ -4,7 +4,7 @@ from unittest.mock import patch
 from coreason_veritas.anchor import DeterminismInterceptor
 
 
-def test_determinism_interceptor_invalid_seed_env():
+def test_determinism_interceptor_invalid_seed_env() -> None:
     """Test that invalid VERITAS_SEED falls back to 42."""
     with patch.dict(os.environ, {"VERITAS_SEED": "invalid_int"}):
         config = {"model": "gpt-4", "temperature": 0.5, "seed": 999}

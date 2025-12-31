@@ -40,10 +40,8 @@ def reset_singleton() -> Generator[None, None, None]:
     else:
         # Fallback if reset method not yet implemented
         IERLogger._instance = None
-        IERLogger._initialized = False
     yield
     if hasattr(IERLogger, "reset"):
         IERLogger.reset()
     else:
         IERLogger._instance = None
-        IERLogger._initialized = False
