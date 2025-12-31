@@ -18,7 +18,6 @@ The stack defined in our `pyproject.toml` is focused and lightweight, designed f
 
 *   **opentelemetry-api**: We depend on OTel to treat AI reasoning traces as critical infrastructure telemetry, enabling cloud-native, enterprise-grade observability.
 *   **cryptography**: This powers our **Gatekeeper** function. We use asymmetric cryptographic verification to ensure that "Agent Specs" have not been tampered with since they were signed by a Scientific Review Board.
-*   **pydantic**: Demonstrates our commitment to strict data validation and type safety, which is essential for structured data handling in GxP environments.
 *   **loguru**: Used for developer ergonomics and structured logging output.
 
 The internal logic is structured around three atomic units that execute in a specific sequence:
