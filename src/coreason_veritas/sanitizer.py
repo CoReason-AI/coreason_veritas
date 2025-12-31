@@ -178,7 +178,7 @@ def scrub_pii_recursive(data: Any) -> Any:
                     target.append(val)
 
                 if created:
-                     stack.append((val, v))
+                    stack.append((val, v))
             else:
                 # Primitive
                 if isinstance(target, dict):
