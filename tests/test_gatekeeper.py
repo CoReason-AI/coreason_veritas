@@ -8,7 +8,6 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
-import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Tuple
 

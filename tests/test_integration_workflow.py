@@ -9,7 +9,6 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple, cast

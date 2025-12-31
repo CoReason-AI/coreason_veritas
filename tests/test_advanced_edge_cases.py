@@ -9,7 +9,6 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import json
 import os
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, Tuple
@@ -157,7 +156,8 @@ async def test_blast_radius_error_tracing(key_pair: Tuple[RSAPrivateKey, str]) -
             # It does NOT call span.record_exception(e) explicitly.
             # OTel instrumentation might catch it if using start_as_current_span, but we are manual now.
 
-            # So this test assumption about checking context manager __exit__ args is invalid with the new implementation.
+            # So this test assumption about checking context manager __exit__ args is invalid with the
+            # new implementation.
             # We should verify that logger.exception was called or something similar.
             # Or that the exception was raised.
 

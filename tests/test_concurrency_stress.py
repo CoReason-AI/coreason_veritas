@@ -9,7 +9,6 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
-import json
 import os
 import random
 from datetime import datetime, timezone
