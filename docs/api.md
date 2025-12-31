@@ -13,7 +13,8 @@ def governed_execution(
     asset_id_arg: str,
     signature_arg: str,
     user_id_arg: str,
-    config_arg: Optional[str] = None
+    config_arg: Optional[str] = None,
+    allow_unsigned: bool = False
 ) -> Callable[..., Any]
 ```
 
@@ -23,6 +24,7 @@ def governed_execution(
 *   `signature_arg` (*str*): The name of the keyword argument in the decorated function that contains the cryptographic signature.
 *   `user_id_arg` (*str*): The name of the keyword argument in the decorated function that contains the user ID.
 *   `config_arg` (*Optional[str]*): The name of the keyword argument in the decorated function that contains the configuration dictionary. If provided, the configuration will be sanitized by the Anchor.
+*   `allow_unsigned` (*bool*): If set to `True`, enables **Draft Mode**, which bypasses the cryptographic signature verification. Defaults to `False`.
 
 **Returns:**
 
@@ -43,7 +45,8 @@ Validates the cryptographic chain of custody for Agent Specs and Charters.
 
 **Technical Specifications:**
 *   **Algorithm:** SHA256 hashing with RSA-PSS padding (MGF1).
-*   **Canonicalization:** JSON payloads are sorted by keys before hashing.
+*   **Canonicalization:** Uses **JCS (JSON Canonicalization Scheme - RFC 8785)** for strict, platform-independent consistency.
+*   **Replay Protection:** Enforces a mandatory `timestamp` field in the payload to prevent replay attacks (max 5-minute skew).
 
 #### `__init__`
 
@@ -101,7 +104,7 @@ def enforce_config(self, raw_config: Dict[str, Any]) -> Dict[str, Any]
 *   (*Dict[str, Any]*): The sanitized configuration dictionary with:
     *   `temperature` set to `0.0`
     *   `top_p` set to `1.0`
-    *   `seed` set to `42`
+    *   `seed` set to `42` (configurable via `VERITAS_SEED` environment variable)
 
 **Behavior:**
 
