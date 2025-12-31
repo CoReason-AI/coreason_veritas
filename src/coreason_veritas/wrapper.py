@@ -194,6 +194,7 @@ class GovernanceContext:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        # Reset ContextVars (Anchor and OTel)
         try:
             if self.token_anchor:
                 self.anchor_var.reset(self.token_anchor)
@@ -206,14 +207,17 @@ class GovernanceContext:
         except BaseException:
             pass
 
+        # End Span
         if self.span:
+            if exc_type:
+                self.span.record_exception(exc_val)
+                self.span.set_status(trace.Status(trace.StatusCode.ERROR))
             self.span.end()
 
+        # Log Execution Result
         if exc_type:
-            # Error handling is done in _handle_error if we called it explicitly?
-            # Wait, if an exception happens in the `with` block, __exit__ is called with exc_type.
-            # We should call _handle_error here.
             self._handle_error(exc_val)
+            # Do NOT return True; allow exception to propagate
         else:
             self._log_end(success=True)
 

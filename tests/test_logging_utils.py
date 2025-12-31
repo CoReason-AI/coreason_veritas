@@ -62,6 +62,33 @@ class TestLoggingUtils(unittest.TestCase):
         self.assertEqual(scrubbed[1], "public")
         self.assertIsInstance(scrubbed, tuple)
 
+    def test_scrub_dag_no_circular_ref(self) -> None:
+        """
+        Test that scrub_sensitive_data correctly handles Directed Acyclic Graphs (DAGs)
+        where an object is referenced multiple times but there is no cycle.
+        """
+        shared_obj = {"safe_key": "value"}
+        # A list containing the same object twice. This is NOT a cycle.
+        data = [shared_obj, shared_obj]
+
+        result = scrub_sensitive_data(data)
+
+        # Both elements should be the scrubbed version of shared_obj
+        self.assertEqual(result[0], {"safe_key": "value"})
+        self.assertEqual(result[1], {"safe_key": "value"})
+        self.assertNotEqual(result[1], "[CIRCULAR_REF]")
+
+    def test_scrub_actual_circular_ref(self) -> None:
+        """
+        Test that scrub_sensitive_data still detects actual circular references.
+        """
+        cycle: Dict[str, Any] = {}
+        cycle["self"] = cycle
+
+        result = scrub_sensitive_data(cycle)
+
+        self.assertEqual(result["self"], "[CIRCULAR_REF]")
+
     def test_otel_sink_emit(self) -> None:
         # Initialize Sink
         sink = OTelLogSink()
