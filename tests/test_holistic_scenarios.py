@@ -10,8 +10,6 @@
 
 import asyncio
 import os
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 from unittest.mock import MagicMock, patch
@@ -22,12 +20,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
-from coreason_veritas.anchor import is_anchor_active, DeterminismInterceptor
+from coreason_veritas.anchor import DeterminismInterceptor, is_anchor_active
 from coreason_veritas.wrapper import governed_execution
 
 # --- Helpers ---
 
-@pytest.fixture
+
+@pytest.fixture  # type: ignore[misc]
 def key_pair() -> Tuple[RSAPrivateKey, str]:
     """Generates a private/public key pair for testing."""
     private_key = rsa.generate_private_key(
@@ -42,6 +41,7 @@ def key_pair() -> Tuple[RSAPrivateKey, str]:
 
     return private_key, pem_public
 
+
 def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     """Helper to sign a payload."""
     canonical_payload = jcs.canonicalize(payload)
@@ -52,9 +52,11 @@ def sign_payload(payload: Dict[str, Any], private_key: RSAPrivateKey) -> str:
     )
     return str(signature.hex())
 
+
 # --- Tests ---
 
-@pytest.mark.asyncio
+
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_holistic_full_lifecycle(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Holistic Test: Full Lifecycle
@@ -93,32 +95,29 @@ async def test_holistic_full_lifecycle(key_pair: Tuple[RSAPrivateKey, str]) -> N
             unsafe_config = {"temperature": 0.9, "seed": 999}
 
             # Execute
-            result = await critical_operation(
-                spec=payload,
-                sig=sig,
-                user="holistic_user",
-                config=unsafe_config
-            )
+            result = await critical_operation(spec=payload, sig=sig, user="holistic_user", config=unsafe_config)
 
             # Verifications
             assert result == "Operation Safe"
 
             # Verify Span Attributes (Auditor)
-            # The context manager calls start_span, then sets attributes on the span?
-            # Actually IERLogger passes attributes to start_span.
             mock_tracer.start_span.assert_called_once()
             call_args = mock_tracer.start_span.call_args
-            attributes = call_args[1].get("attributes") if len(call_args) > 1 else call_args[0][1] if len(call_args[0]) > 1 else {}
-            # Note: GovernanceContext creates the span via IERLogger using start_span(name, attributes=...)
-            # Let's inspect the call carefully.
-            _, kwargs = mock_tracer.start_span.call_args
-            attributes = kwargs.get("attributes")
+
+            # Robustly extract attributes whether passed as args or kwargs
+            if len(call_args.args) > 1:
+                attributes = call_args.args[1].get("attributes", {})
+            elif "attributes" in call_args.kwargs:
+                attributes = call_args.kwargs["attributes"]
+            else:
+                attributes = {}
 
             assert attributes["co.user_id"] == "holistic_user"
             assert attributes["co.asset_id"] == str(payload)
             assert attributes["co.srb_sig"] == sig
 
-@pytest.mark.asyncio
+
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_holistic_concurrent_isolation(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Holistic Test: Concurrent Isolation
@@ -137,7 +136,7 @@ async def test_holistic_concurrent_isolation(key_pair: Tuple[RSAPrivateKey, str]
 
             @governed_execution(asset_id_arg="spec", signature_arg="sig", user_id_arg="user")
             async def governed_task(spec: Dict[str, Any], sig: str, user: str) -> bool:
-                await asyncio.sleep(0.01) # Simulate work
+                await asyncio.sleep(0.01)  # Simulate work
                 return is_anchor_active()
 
             async def ungoverned_task() -> bool:
@@ -146,24 +145,19 @@ async def test_holistic_concurrent_isolation(key_pair: Tuple[RSAPrivateKey, str]
 
             # Run both in parallel
             governed_result, ungoverned_result = await asyncio.gather(
-                governed_task(spec=payload, sig=sig, user="user1"),
-                ungoverned_task()
+                governed_task(spec=payload, sig=sig, user="user1"), ungoverned_task()
             )
 
             assert governed_result is True, "Governed task must be anchored"
             assert ungoverned_result is False, "Ungoverned task must NOT be anchored"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_holistic_thread_safety(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Holistic Test: Thread Safety
     Verifies that contextvars (Anchor) work correctly across threads when using run_in_executor.
-    Standard contextvars should propagate to threads if copied, but default behavior depends on python version and executor.
-    However, coreason_veritas relies on contextvars which are thread-local.
-    This test verifies that the anchor is *isolated* per thread or *propagated* if intended?
-    Actually, contextvars are thread-local but `asyncio.to_thread` or `run_in_executor` *does* copy context in Python 3.7+.
-    So we expect propagation if called from within a governed block.
+    Standard contextvars should propagate to threads if copied (default in Py3.7+ via asyncio.to_thread).
     """
     private_key, public_key_pem = key_pair
     payload = {"mission": "threading", "timestamp": datetime.now(timezone.utc).isoformat()}
@@ -189,7 +183,7 @@ async def test_holistic_thread_safety(key_pair: Tuple[RSAPrivateKey, str]) -> No
             assert result is True, "Anchor should propagate to worker threads via asyncio.to_thread"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_holistic_sanitization_integration(key_pair: Tuple[RSAPrivateKey, str]) -> None:
     """
     Holistic Test: Automatic Sanitization Integration
@@ -210,26 +204,23 @@ async def test_holistic_sanitization_integration(key_pair: Tuple[RSAPrivateKey, 
                 asset_id_arg="spec",
                 signature_arg="sig",
                 user_id_arg="user",
-                config_arg="llm_config" # Enable auto-sanitization
+                config_arg="llm_config",  # Enable auto-sanitization
             )
-            async def auto_sanitized_func(spec: Dict[str, Any], sig: str, user: str, llm_config: Dict[str, Any]) -> Dict[str, Any]:
+            async def auto_sanitized_func(
+                spec: Dict[str, Any], sig: str, user: str, llm_config: Dict[str, Any]
+            ) -> Dict[str, Any]:
                 return llm_config
 
             unsafe = {"temperature": 0.8, "top_p": 0.95, "seed": 100}
 
             # Execute
-            sanitized = await auto_sanitized_func(
-                spec=payload,
-                sig=sig,
-                user="sanitize_user",
-                llm_config=unsafe
-            )
+            sanitized = await auto_sanitized_func(spec=payload, sig=sig, user="sanitize_user", llm_config=unsafe)
 
             assert sanitized["temperature"] == 0.0
             assert sanitized["top_p"] == 1.0
             assert sanitized["seed"] == 42
-            # Verify original object wasn't mutated in place if possible (though interceptor might return new dict)
-            assert unsafe["temperature"] == 0.8, "Original config dict should not be mutated in the caller scope"
+            # Verify original object wasn't mutated in place
+            assert unsafe["temperature"] == 0.8, "Original config dict should not be mutated"
 
 
 def test_holistic_sync_wrapper(key_pair: Tuple[RSAPrivateKey, str]) -> None:
