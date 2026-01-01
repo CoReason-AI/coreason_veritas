@@ -350,9 +350,11 @@ class TestLoggingUtils(unittest.TestCase):
 
     def test_scrub_custom_object(self) -> None:
         """Test custom object with __dict__ is converted to string."""
+
         class MyObj:
             def __init__(self) -> None:
                 self.x = 1
+
             def __str__(self) -> str:
                 return "MyObjString"
 
@@ -364,10 +366,10 @@ class TestLoggingUtils(unittest.TestCase):
         """Test environment variable loading for sensitive keys via module reload."""
         import importlib
         import os
+
         from coreason_veritas import logging_utils
 
         # Save original state
-        original_keys = logging_utils.SENSITIVE_KEYS.copy()
         original_env = os.environ.get("VERITAS_SENSITIVE_KEYS")
 
         try:
@@ -398,7 +400,7 @@ class TestLoggingUtils(unittest.TestCase):
         # Create a deep structure
         root: Dict[str, Any] = {}
         curr = root
-        for i in range(25):
+        for _ in range(25):
             curr["next"] = {}
             curr = curr["next"]
 
