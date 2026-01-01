@@ -13,7 +13,7 @@ from coreason_veritas.exceptions import (
 )
 
 
-def test_exception_inheritance():
+def test_exception_inheritance() -> None:
     """Verify the inheritance hierarchy of exceptions."""
     assert issubclass(ClientError, CoreasonError)
     assert issubclass(ServerError, CoreasonError)
@@ -27,20 +27,20 @@ def test_exception_inheritance():
     assert issubclass(AssetTamperedError, Exception)
 
 
-def test_exception_instantiation():
+def test_exception_instantiation() -> None:
     """Verify that exceptions can be instantiated."""
-    err = CoreasonError("test")
+    err: CoreasonError = CoreasonError("test")
     assert str(err) == "test"
     assert err.response is None
     assert err.status_code is None
 
-    err = QuotaExceededError("quota exceeded")
-    assert isinstance(err, BudgetExceededError)
-    assert isinstance(err, ClientError)
-    assert isinstance(err, CoreasonError)
+    err_quota: QuotaExceededError = QuotaExceededError("quota exceeded")
+    assert isinstance(err_quota, BudgetExceededError)
+    assert isinstance(err_quota, ClientError)
+    assert isinstance(err_quota, CoreasonError)
 
-    err = CircuitOpenError("circuit open")
-    assert isinstance(err, CoreasonError)
+    err_circuit: CircuitOpenError = CircuitOpenError("circuit open")
+    assert isinstance(err_circuit, CoreasonError)
 
-    err = AssetTamperedError("tampered")
-    assert isinstance(err, Exception)
+    err_asset: AssetTamperedError = AssetTamperedError("tampered")
+    assert isinstance(err_asset, Exception)

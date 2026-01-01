@@ -6,24 +6,24 @@ from coreason_veritas.exceptions import CircuitOpenError
 from coreason_veritas.resilience import AsyncCircuitBreaker
 
 
-async def success_func():
+async def success_func() -> str:
     return "success"
 
 
-async def fail_func():
+async def fail_func() -> None:
     raise ValueError("fail")
 
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_success():
+@pytest.mark.asyncio  # type: ignore
+async def test_circuit_breaker_success() -> None:
     cb = AsyncCircuitBreaker(fail_max=2)
     res = await cb.call(success_func)
     assert res == "success"
     assert cb.state == "closed"
 
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_trip():
+@pytest.mark.asyncio  # type: ignore
+async def test_circuit_breaker_trip() -> None:
     cb = AsyncCircuitBreaker(fail_max=2, time_window=10)
 
     # 1st failure
@@ -42,8 +42,8 @@ async def test_circuit_breaker_trip():
         await cb.call(success_func)
 
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_recovery():
+@pytest.mark.asyncio  # type: ignore
+async def test_circuit_breaker_recovery() -> None:
     # Short reset timeout
     cb = AsyncCircuitBreaker(fail_max=1, reset_timeout=0.1)
 
@@ -63,8 +63,8 @@ async def test_circuit_breaker_recovery():
     assert len(cb.failure_history) == 0
 
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_context_manager():
+@pytest.mark.asyncio  # type: ignore
+async def test_circuit_breaker_context_manager() -> None:
     cb = AsyncCircuitBreaker(fail_max=1)
 
     # Trip it via context manager
@@ -80,8 +80,8 @@ async def test_circuit_breaker_context_manager():
             await success_func()
 
 
-@pytest.mark.asyncio
-async def test_circuit_breaker_time_window():
+@pytest.mark.asyncio  # type: ignore
+async def test_circuit_breaker_time_window() -> None:
     cb = AsyncCircuitBreaker(fail_max=2, time_window=0.1)
 
     # 1st failure

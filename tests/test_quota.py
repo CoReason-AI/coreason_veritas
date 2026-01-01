@@ -6,8 +6,8 @@ from coreason_veritas.exceptions import QuotaExceededError
 from coreason_veritas.quota import QuotaGuard
 
 
-@pytest.fixture
-def mock_redis():
+@pytest.fixture  # type: ignore
+def mock_redis() -> AsyncMock:
     redis = AsyncMock()
     # Mock return values for common operations
     redis.incrbyfloat.return_value = 5.0
@@ -15,15 +15,15 @@ def mock_redis():
     return redis
 
 
-@pytest.mark.asyncio
-async def test_quota_guard_init(mock_redis):
+@pytest.mark.asyncio  # type: ignore
+async def test_quota_guard_init(mock_redis: AsyncMock) -> None:
     guard = QuotaGuard(mock_redis, daily_limit=100.0)
     assert guard.daily_limit == 100.0
     assert guard.redis == mock_redis
 
 
-@pytest.mark.asyncio
-async def test_check_and_increment_success(mock_redis):
+@pytest.mark.asyncio  # type: ignore
+async def test_check_and_increment_success(mock_redis: AsyncMock) -> None:
     guard = QuotaGuard(mock_redis, daily_limit=10.0)
 
     # Mock incrbyfloat to return 5.0 (under limit)
@@ -36,8 +36,8 @@ async def test_check_and_increment_success(mock_redis):
     mock_redis.expire.assert_called_once_with(guard._get_key("user1"), 172800)
 
 
-@pytest.mark.asyncio
-async def test_check_and_increment_exceeded(mock_redis):
+@pytest.mark.asyncio  # type: ignore
+async def test_check_and_increment_exceeded(mock_redis: AsyncMock) -> None:
     guard = QuotaGuard(mock_redis, daily_limit=10.0)
 
     # Mock incrbyfloat to return 11.0 (over limit)
@@ -53,8 +53,8 @@ async def test_check_and_increment_exceeded(mock_redis):
     assert args[1] == -5.0
 
 
-@pytest.mark.asyncio
-async def test_check_status_under_limit(mock_redis):
+@pytest.mark.asyncio  # type: ignore
+async def test_check_status_under_limit(mock_redis: AsyncMock) -> None:
     guard = QuotaGuard(mock_redis, daily_limit=10.0)
 
     mock_redis.get.return_value = b"5.0"
@@ -63,8 +63,8 @@ async def test_check_status_under_limit(mock_redis):
     assert status is True
 
 
-@pytest.mark.asyncio
-async def test_check_status_over_limit(mock_redis):
+@pytest.mark.asyncio  # type: ignore
+async def test_check_status_over_limit(mock_redis: AsyncMock) -> None:
     guard = QuotaGuard(mock_redis, daily_limit=10.0)
 
     mock_redis.get.return_value = b"10.0"  # Equals limit (strict inequality < limit?)
@@ -75,8 +75,8 @@ async def test_check_status_over_limit(mock_redis):
     assert status is False
 
 
-@pytest.mark.asyncio
-async def test_check_status_none(mock_redis):
+@pytest.mark.asyncio  # type: ignore
+async def test_check_status_none(mock_redis: AsyncMock) -> None:
     guard = QuotaGuard(mock_redis, daily_limit=10.0)
 
     mock_redis.get.return_value = None
