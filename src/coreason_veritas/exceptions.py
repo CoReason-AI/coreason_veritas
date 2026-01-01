@@ -8,6 +8,72 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import httpx
+
+
+class CoreasonError(Exception):
+    """Base exception for all Coreason SDK errors."""
+
+    def __init__(self, message: str, response: httpx.Response | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.response = response
+        self.status_code = response.status_code if response is not None else None
+
+
+class ClientError(CoreasonError):
+    """Exception raised for 4xx Client Errors."""
+
+    pass
+
+
+class ServerError(CoreasonError):
+    """Exception raised for 5xx Server Errors."""
+
+    pass
+
+
+class AuthenticationError(ClientError):
+    """Exception raised for 401/403 Authentication Errors."""
+
+    pass
+
+
+class BudgetExceededError(ClientError):
+    """Exception raised for 402 Budget Exceeded Errors."""
+
+    pass
+
+
+class QuotaExceededError(BudgetExceededError):
+    """Exception raised when a daily financial quota is exceeded."""
+
+    pass
+
+
+class ComplianceViolationError(ClientError):
+    """Exception raised for 422 Compliance/Policy Violation Errors."""
+
+    pass
+
+
+class RateLimitError(ClientError):
+    """Exception raised for 429 Rate Limit Errors."""
+
+    pass
+
+
+class ServiceUnavailableError(ServerError):
+    """Exception raised for 502/503/504 Service Unavailable Errors."""
+
+    pass
+
+
+class CircuitOpenError(CoreasonError):
+    """Raised when the circuit breaker is open."""
+
+    pass
+
 
 class AssetTamperedError(Exception):
     """Raised when asset verification fails."""
