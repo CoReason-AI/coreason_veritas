@@ -147,7 +147,9 @@ class GovernanceContext:
         self.token_anchor: Any = None
         self.ier_logger = IERLogger()
 
-    def prepare(self) -> inspect.BoundArguments:
+        self._prepare()
+
+    def _prepare(self) -> None:
         self.start_time = time.perf_counter()
         try:
             self.attributes, self.bound = _prepare_governance(
@@ -161,7 +163,6 @@ class GovernanceContext:
                 self.allow_unsigned,
             )
             self._log_start()
-            return self.bound
         except Exception as e:
             self._handle_error(e)
             raise e
@@ -238,22 +239,6 @@ class GovernanceContext:
         self.__exit__(exc_type, exc_val, exc_tb)
 
 
-def _create_governance_context(
-    func: Callable[..., Any],
-    args: Any,
-    kwargs: Any,
-    asset_id_arg: str,
-    signature_arg: str,
-    user_id_arg: str,
-    config_arg: Optional[str],
-    allow_unsigned: bool,
-) -> Tuple[GovernanceContext, inspect.BoundArguments]:
-    """Helper to create and prepare GovernanceContext."""
-    ctx = GovernanceContext(func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned)
-    bound = ctx.prepare()
-    return ctx, bound
-
-
 def governed_execution(
     asset_id_arg: str,
     signature_arg: str,
@@ -277,11 +262,12 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx, bound = _create_governance_context(
+                ctx = GovernanceContext(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
+                assert ctx.bound is not None
                 async with ctx:
-                    async for item in func(*bound.args, **bound.kwargs):
+                    async for item in func(*ctx.bound.args, **ctx.bound.kwargs):
                         yield item
 
             return wrapper
@@ -290,11 +276,12 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx, bound = _create_governance_context(
+                ctx = GovernanceContext(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
+                assert ctx.bound is not None
                 with ctx:
-                    yield from func(*bound.args, **bound.kwargs)
+                    yield from func(*ctx.bound.args, **ctx.bound.kwargs)
 
             return wrapper
 
@@ -302,11 +289,12 @@ def governed_execution(
 
             @wraps(func)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx, bound = _create_governance_context(
+                ctx = GovernanceContext(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
+                assert ctx.bound is not None
                 async with ctx:
-                    return await func(*bound.args, **bound.kwargs)
+                    return await func(*ctx.bound.args, **ctx.bound.kwargs)
 
             return wrapper
 
@@ -314,11 +302,12 @@ def governed_execution(
 
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                ctx, bound = _create_governance_context(
+                ctx = GovernanceContext(
                     func, args, kwargs, asset_id_arg, signature_arg, user_id_arg, config_arg, allow_unsigned
                 )
+                assert ctx.bound is not None
                 with ctx:
-                    return func(*bound.args, **bound.kwargs)
+                    return func(*ctx.bound.args, **ctx.bound.kwargs)
 
             return wrapper
 
