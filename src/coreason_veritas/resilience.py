@@ -35,15 +35,19 @@ class AsyncCircuitBreaker:
         self.state = "closed"
         self.last_failure_time = 0.0
 
-    async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """
-        Calls the async function, managing circuit state.
-        """
+    def _check_state(self) -> None:
+        """Checks and updates the circuit state based on time and history."""
         if self.state == "open":
             if time.monotonic() - self.last_failure_time > self.reset_timeout:
                 self.state = "half-open"
             else:
                 raise CircuitOpenError("Circuit is open")
+
+    async def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """
+        Calls the async function, managing circuit state.
+        """
+        self._check_state()
 
         try:
             result = await func(*args, **kwargs)
@@ -81,11 +85,7 @@ class AsyncCircuitBreaker:
             self.failure_history.clear()
 
     async def __aenter__(self) -> "AsyncCircuitBreaker":
-        if self.state == "open":
-            if time.monotonic() - self.last_failure_time > self.reset_timeout:
-                self.state = "half-open"
-            else:
-                raise CircuitOpenError("Circuit is open")
+        self._check_state()
         return self
 
     async def __aexit__(

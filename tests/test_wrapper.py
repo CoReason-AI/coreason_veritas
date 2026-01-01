@@ -698,8 +698,6 @@ def test_governance_context_cleanup_exceptions(key_pair: Tuple[RSAPrivateKey, st
                         anchor_var=mock_anchor_var,  # Inject mock
                     )
 
-                    ctx.prepare()
-
                     # Run context manager
                     with ctx:
                         pass
