@@ -40,7 +40,7 @@ class AsyncCircuitBreaker:
         Calls the async function, managing circuit state.
         """
         if self.state == "open":
-            if time.time() - self.last_failure_time > self.reset_timeout:
+            if time.monotonic() - self.last_failure_time > self.reset_timeout:
                 self.state = "half-open"
             else:
                 raise CircuitOpenError("Circuit is open")
@@ -62,7 +62,7 @@ class AsyncCircuitBreaker:
             self.failure_history.popleft()
 
     def _handle_failure(self) -> None:
-        now = time.time()
+        now = time.monotonic()
         self.last_failure_time = now
         self.failure_history.append(now)
         self._prune_history(now)
@@ -82,7 +82,7 @@ class AsyncCircuitBreaker:
 
     async def __aenter__(self) -> "AsyncCircuitBreaker":
         if self.state == "open":
-            if time.time() - self.last_failure_time > self.reset_timeout:
+            if time.monotonic() - self.last_failure_time > self.reset_timeout:
                 self.state = "half-open"
             else:
                 raise CircuitOpenError("Circuit is open")
