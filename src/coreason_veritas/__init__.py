@@ -19,13 +19,20 @@ from loguru import logger
 from .anchor import DeterminismInterceptor
 from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
+from .sanitizer import scrub_pii_payload, scrub_pii_recursive
 from .wrapper import governed_execution
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
-__all__ = ["governed_execution", "SignatureValidator", "DeterminismInterceptor"]
+__all__ = [
+    "governed_execution",
+    "SignatureValidator",
+    "DeterminismInterceptor",
+    "scrub_pii_payload",
+    "scrub_pii_recursive",
+]
 
 
 def initialize() -> None:

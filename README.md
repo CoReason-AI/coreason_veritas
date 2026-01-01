@@ -19,12 +19,16 @@ The stack defined in our `pyproject.toml` is focused and lightweight, designed f
 *   **opentelemetry-api**: We depend on OTel to treat AI reasoning traces as critical infrastructure telemetry, enabling cloud-native, enterprise-grade observability.
 *   **cryptography**: This powers our **Gatekeeper** function. We use asymmetric cryptographic verification to ensure that "Agent Specs" have not been tampered with since they were signed by a Scientific Review Board.
 *   **loguru**: Used for developer ergonomics and structured logging output.
+*   **fastapi/uvicorn/httpx**: Powers the **Gateway Proxy** mode, allowing `coreason_veritas` to act as a standalone governance sidecar.
+*   **jcs (JSON Canonicalization Scheme)**: Ensures consistent hashing of JSON payloads across platforms.
+*   **presidio-analyzer**: (Optional) Powered by Microsoft Presidio, this drives the **Sanitizer** to detect and redaction PII.
 
-The internal logic is structured around three atomic units that execute in a specific sequence:
+The internal logic is structured around four atomic units:
 
 1.  **The Gatekeeper:** Verifies the cryptographic signature of the input asset before any code runs. If the signature is invalid, execution halts immediately.
 2.  **The Auditor:** Initializes an OpenTelemetry span with mandatory attributes (User ID, Asset ID, Signature) to create the IER.
-3.  **The Anchor:** Uses Python's `contextvars` to set a thread-safe flag (`_ANCHOR_ACTIVE`). It creates a scope where any LLM configuration is sanitized—forcing `temperature=0.0` and `seed=42`—effectively "lobotomizing" the model to ensure it produces the exact same output for the same input every time.
+3.  **The Anchor:** Uses Python's `contextvars` to set a thread-safe flag (`_ANCHOR_ACTIVE`). It creates a scope where any LLM configuration is sanitized—forcing `temperature=0.0` and `seed=42` (configurable via `VERITAS_SEED`)—effectively "lobotomizing" the model to ensure it produces the exact same output for the same input every time.
+4.  **The Sanitizer:** An optional utility that scans payloads for Personally Identifiable Information (PII) like phone numbers or email addresses and redacts them before logging or processing.
 
 ### **3. In Practice (The How)**
 
