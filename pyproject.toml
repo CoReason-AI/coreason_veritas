@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "coreason-veritas"
-version = "0.5.0"
+version = "0.6.0"
 description = "coreason_veritas is the non-negotiable governance layer of the CoReason platform (Prosperity Public License 3.0.0)"
 authors = ["Gowtham A Rao <gowtham.rao@coreason.ai>"]
 license = "Proprietary"
@@ -37,6 +37,7 @@ opentelemetry-instrumentation-fastapi = "^0.60b1"
 jcs = "^0.2.1"
 presidio-analyzer = "^2.2.355"
 spacy = "^3.7.2"
+redis = "^7.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.2.2"

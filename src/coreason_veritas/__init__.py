@@ -19,10 +19,12 @@ from loguru import logger
 from .anchor import DeterminismInterceptor
 from .auditor import IERLogger
 from .gatekeeper import SignatureValidator
+from .quota import QuotaGuard
+from .resilience import AsyncCircuitBreaker
 from .sanitizer import scrub_pii_payload, scrub_pii_recursive
 from .wrapper import governed_execution
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
@@ -32,6 +34,8 @@ __all__ = [
     "DeterminismInterceptor",
     "scrub_pii_payload",
     "scrub_pii_recursive",
+    "AsyncCircuitBreaker",
+    "QuotaGuard",
 ]
 
 
