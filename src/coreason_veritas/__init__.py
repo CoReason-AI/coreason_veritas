@@ -22,7 +22,7 @@ from .gatekeeper import SignatureValidator
 from .sanitizer import scrub_pii_payload, scrub_pii_recursive
 from .wrapper import governed_execution
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __author__ = "Gowtham A Rao"
 __email__ = "gowtham.rao@coreason.ai"
 
