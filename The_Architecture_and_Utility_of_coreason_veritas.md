@@ -13,11 +13,14 @@ The stack defined in `pyproject.toml` is precise, selecting dependencies that en
 *   **`opentelemetry-api`**: This is the backbone of the **Auditor**. It treats AI reasoning traces as critical infrastructure telemetry, enabling the creation of an Immutable Execution Record (IER) that persists beyond the lifespan of the request.
 *   **`cryptography`**: Powers the **Gatekeeper**. It provides the asymmetric cryptographic primitives necessary to verify that "Agent Specs" have not been tampered with since they were signed by a Scientific Review Board.
 *   **`jcs` (JSON Canonicalization Scheme)**: A subtle but critical engineering nuance. To ensure signatures are robust and reproducible across different systems (e.g., Python vs. Node.js), `veritas` uses `jcs` to create a canonical, mathematically consistent representation of the JSON payload before hashing. This prevents "fragile signature" failures caused by insignificant whitespace or key-ordering differences.
+*   **`fastapi`, `uvicorn`, `httpx`**: Enables the **Gateway Proxy** mode, allowing `coreason_veritas` to act as a standalone governance sidecar for environments where library injection is not feasible.
+*   **`presidio-analyzer`** (Optional): Provides the engine for the **Sanitizer**, detecting and redacting Personally Identifiable Information (PII) from logs and payloads.
 
-The internal logic operates as a three-stage pipeline:
+The internal logic operates as a four-stage pipeline:
 1.  **The Gatekeeper:** First, the `SignatureValidator` uses `jcs` to canonicalize the input asset and verifies its cryptographic signature. If the signature is invalid, execution is strictly blocked.
 2.  **The Auditor:** Once verified, the `IERLogger` initializes an OpenTelemetry span, tagging it with mandatory governance attributes (User ID, Asset ID, Signature).
-3.  **The Anchor:** Finally, the `DeterminismInterceptor` uses Python's `contextvars` to activate a thread-safe scope. Inside this scope, the "Lobotomy Protocol" is active: any LLM configuration is intercepted and sanitized—forcing `temperature=0.0` and `seed=42`—ensuring the model behaves deterministically.
+3.  **The Anchor:** Finally, the `DeterminismInterceptor` uses Python's `contextvars` to activate a thread-safe scope. Inside this scope, the "Lobotomy Protocol" is active: any LLM configuration is intercepted and sanitized—forcing `temperature=0.0` and `seed=42` (configurable via `VERITAS_SEED`)—ensuring the model behaves deterministically.
+4.  **The Sanitizer:** Throughout the lifecycle, the `PIIAnalyzer` (if enabled) scans data structures for sensitive information, redacting it before it reaches logs or external providers.
 
 ### 3. In Practice (The How)
 

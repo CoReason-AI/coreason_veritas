@@ -210,3 +210,104 @@ The `attributes` dictionary (or the resulting span attributes) **must** contain:
 **Raises:**
 
 *   `ValueError`: If any mandatory attribute is missing.
+
+#### `log_llm_transaction`
+
+Logs an LLM transaction with standardized attributes for governance and auditing.
+
+```python
+def log_llm_transaction(
+    self,
+    trace_id: str,
+    user_id: str,
+    project_id: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: float,
+    latency_ms: int
+) -> None
+```
+
+**Parameters:**
+
+*   `trace_id` (*str*): The request trace ID.
+*   `user_id` (*str*): The ID of the user initiating the request.
+*   `project_id` (*str*): The ID of the project/asset.
+*   `model` (*str*): The name of the model used.
+*   `input_tokens` (*int*): Number of input tokens.
+*   `output_tokens` (*int*): Number of output tokens.
+*   `cost_usd` (*float*): Estimated cost in USD.
+*   `latency_ms` (*int*): Latency in milliseconds.
+
+#### `create_governed_span`
+
+Creates and starts a span but does NOT activate it in the current context. Useful for async generators where context management needs to be manual.
+
+```python
+def create_governed_span(
+    self,
+    name: str,
+    attributes: Dict[str, str]
+) -> trace.Span
+```
+
+**Parameters:**
+
+*   `name` (*str*): The name of the span.
+*   `attributes` (*Dict[str, str]*): A dictionary of attributes to add to the span.
+
+**Returns:**
+
+*   (*trace.Span*): The created OpenTelemetry span.
+
+#### `register_sink`
+
+Register a new audit sink callback.
+
+```python
+def register_sink(
+    self,
+    callback: Callable[[Dict[str, Any]], None]
+) -> None
+```
+
+**Parameters:**
+
+*   `callback` (*Callable[[Dict[str, Any]], None]*): A function that accepts a dictionary of audit events.
+
+---
+
+## Sanitizer
+
+### `scrub_pii_payload`
+
+Scrub PII from a string. Scans for "PHONE_NUMBER", "EMAIL_ADDRESS", and "PERSON" entities and replaces them with redacted placeholders.
+
+```python
+def scrub_pii_payload(text: str | None) -> str | None
+```
+
+**Parameters:**
+
+*   `text` (*str | None*): The text to scrub.
+
+**Returns:**
+
+*   (*str | None*): The redacted text, or `None` if input was `None`.
+
+### `scrub_pii_recursive`
+
+Recursively scrub PII from data structures (dict, list) using an iterative stack-based approach.
+
+```python
+def scrub_pii_recursive(data: Any) -> Any
+```
+
+**Parameters:**
+
+*   `data` (*Any*): The data structure to scrub.
+
+**Returns:**
+
+*   (*Any*): A new data structure with redacted values.

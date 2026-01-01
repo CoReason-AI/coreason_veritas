@@ -3,7 +3,7 @@
 **Role:** Governance Middleware (The "Safety Anchor")
 **Context:** GxP Enforcement & Immutable Audit
 **Runtime:** Python 3.11+
-**Dependencies:** `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp`, `fastapi`, `uvicorn`, `httpx`, `pydantic`, `cryptography`
+**Dependencies:** `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp`, `fastapi`, `uvicorn`, `httpx`, `pydantic`, `cryptography`, `jcs`, `presidio-analyzer`
 
 ## **1. Design Philosophy**
 
@@ -14,18 +14,20 @@ It operates on the principle of **"Trust through Constraint"**:
 1. **The Gatekeeper:** No code executes without a valid SRB (Scientific Review Board) signature.
 2. **The Anchor:** No inference runs with stochastic parameters (Temperature is forced to 0.0).
 3. **The Auditor:** No action occurs without a corresponding Immutable Execution Record (IER) span.
+4. **The Sanitizer:** No sensitive data (PII) leaks into logs or external providers.
 
 This package is designed to be injected as **Middleware** (for API routes) or **Decorators** (for service methods), acting as a "clean room" wrapper around execution logic.
 
 ## **2. Architecture & Modules**
 
-The package is structured into three primary enforcement modules corresponding to its core responsibilities.
+The package is structured into four primary enforcement modules corresponding to its core responsibilities.
 
 | Module | Component | Responsibility | Failure Mode |
 | --- | --- | --- | --- |
 | **gatekeeper** | **Asset Verifier** | Validates the cryptographic chain of custody for Agent Specs and Charters. | **Block (403):** "Untrusted Asset" |
 | **anchor** | **Determinism Enforcer** | Intercepts LLM calls to override configuration (Temp=0, Seeds). | **Override (Warn):** Forces Config |
 | **auditor** | **IER Logger** | Emits OpenTelemetry spans to WORM storage. | **Halt (500):** "Audit Failure" |
+| **sanitizer** | **PII Redactor** | Scans and redacts sensitive information. | **Fail Open (Warn):** Returns original text if analyzer fails |
 
 ## **3. Module Specifications**
 
@@ -50,8 +52,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 import jcs
 
 class SignatureValidator:
-    def __init__(self, public_key_store: str = None):
-        self.public_key_store = public_key_store
+    def __init__(self, public_key_store: str):
+        self.key_store = public_key_store
 
     def verify_asset(self, asset_payload: dict, signature: str, check_timestamp: bool = True) -> bool:
         """
@@ -134,6 +136,40 @@ class IERLogger:
 
 ```
 
+### **3.4 coreason_veritas.sanitizer**
+
+**Responsibility:** Data Privacy. Scans and redacts Personally Identifiable Information (PII) from data structures and strings before they are logged or processed.
+
+**Technical Requirements:**
+
+* **Library:** `presidio-analyzer`
+* **Entities:** Scans for `PHONE_NUMBER`, `EMAIL_ADDRESS`, `PERSON`.
+* **Behavior:**
+* Uses a Singleton `PIIAnalyzer` to manage the heavy NLP model.
+* Provides `scrub_pii_payload` for strings.
+* Provides `scrub_pii_recursive` for deep cleaning of JSON-like structures (dicts/lists), handling circular references.
+* **Failure Mode:** Fail Open. If the analyzer fails or is missing, it logs a warning but returns the original data (to avoid breaking the application).
+
+
+**Key Functions:** `scrub_pii_payload`, `scrub_pii_recursive`
+
+```python
+from presidio_analyzer import AnalyzerEngine
+
+def scrub_pii_payload(text: str | None) -> str | None:
+    """
+    Scans text for PII entities and replaces them with <REDACTED {ENTITY_TYPE}>.
+    """
+    pass
+
+def scrub_pii_recursive(data: Any) -> Any:
+    """
+    Recursively traverses dictionaries and lists to scrub PII from all string values.
+    Handles circular references.
+    """
+    pass
+```
+
 ## **4. The Veritas Wrapper (Usage Pattern)**
 
 The primary interface for developers is the `@governed_execution` decorator, which bundles all three pillars into a single atomic wrapper.
@@ -188,111 +224,179 @@ Example scripts:
 This module acts as the "Determinism Enforcer".
 
 class DeterminismInterceptor:
-    """ANCHOR: Forces Epistemic Integrity by ensuring deterministic LLM calls."""
+    """
+    Acts as a proxy/hook into the LLM Client configuration.
+    Enforces the 'Lobotomy Protocol' for epistemic integrity.
+    """
 
     @staticmethod
-    def enforce_config(payload: dict) -> dict:
-        """The 'Lobotomy Protocol': Forcibly sets temp=0.0 and seed=42 (or ENV)."""
-        sanitized = payload.copy()
+    def enforce_config(raw_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        The 'Lobotomy Protocol':
+        1. Forcibly sets `temperature = 0.0`.
+        2. Forcibly sets `top_p = 1.0`.
+        3. Injects `seed = 42`.
+        4. Logs a warning if the original config attempted to deviate.
+        """
+        sanitized = copy.deepcopy(raw_config)
+
+        # Check for deviations to log warnings
+        if sanitized.get("temperature") is not None and sanitized.get("temperature") != 0.0:
+            logger.warning(f"DeterminismInterceptor: Overriding unsafe temperature {sanitized['temperature']} to 0.0")
+
+        if sanitized.get("top_p") is not None and sanitized.get("top_p") != 1.0:
+            logger.warning(f"DeterminismInterceptor: Overriding unsafe top_p {sanitized['top_p']} to 1.0")
+
+        if sanitized.get("seed") is not None and sanitized.get("seed") != 42:
+            logger.warning(f"DeterminismInterceptor: Overriding seed {sanitized['seed']} to 42")
+
+        # Enforce values
         sanitized["temperature"] = 0.0
-        sanitized["seed"] = int(os.getenv("VERITAS_SEED", 42))
         sanitized["top_p"] = 1.0
+        try:
+            sanitized["seed"] = int(os.getenv("VERITAS_SEED", 42))
+        except ValueError:
+            logger.warning("VERITAS_SEED is not a valid integer. Falling back to default 42.")
+            sanitized["seed"] = 42
+
         return sanitized
 
 2. src/coreason_veritas/gatekeeper.py
 This module acts as the "Supply Chain Security" layer.
-import json
-import jcs
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-from datetime import datetime, timezone
 
 class SignatureValidator:
-    """GATEKEEPER: Validates cryptographic signatures for Agent Specs."""
+    """
+    Validates the cryptographic chain of custody for Agent Specs and Charters.
+    """
 
-    def __init__(self, public_key_pem: str = None):
-        self.public_key_pem = public_key_pem
+    def __init__(self, public_key_store: str):
+        """
+        Initialize the validator with the public key store.
 
-    def verify_asset(self, payload: dict, signature_hex: str, check_timestamp: bool = True) -> bool:
-        """Verifies if the asset payload matches the provided SRB signature with replay protection."""
-        if not signature_hex or not self.public_key_pem:
-            return False
-
-        # Replay Protection (Example simplified)
-        if check_timestamp:
-            ts_str = payload.get("timestamp")
-            # ... logic to check ts_str against datetime.now() with 5m skew ...
-
+        Args:
+            public_key_store: The SRB Public Key (PEM format string).
+        """
+        self.key_store = public_key_store
+        # Pre-load the public key to improve performance on repeated verification calls
         try:
-            public_key = serialization.load_pem_public_key(self.public_key_pem.encode())
-            # Use JCS for canonicalization
-            canonical_payload = jcs.canonicalize(payload)
+            self._public_key = serialization.load_pem_public_key(self.key_store.encode())
+        except Exception as e:
+            # We log but allow initialization; verification will fail later if key is invalid,
+            # or we could raise here. Raising here is safer to fail fast.
+            logger.error(f"Failed to load public key: {e}")
+            raise ValueError(f"Invalid public key provided: {e}") from e
+
+    def verify_asset(self, asset_payload: Dict[str, Any], signature: str, check_timestamp: bool = True) -> bool:
+        """
+        Verifies the `x-coreason-sig` header against the payload hash.
+        """
+        try:
+            # 1. Replay Protection Check
+            if check_timestamp:
+                timestamp_str = asset_payload.get("timestamp")
+                if not timestamp_str:
+                    raise ValueError("Missing 'timestamp' in payload")
+
+                try:
+                    # ISO 8601 format expected
+                    ts = datetime.fromisoformat(str(timestamp_str))
+                    # Ensure timezone awareness (assuming UTC if not provided, or reject naive?)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except ValueError as e:
+                    raise ValueError(f"Invalid 'timestamp' format: {e}") from e
+
+                now = datetime.now(timezone.utc)
+                # Allow 5 minutes clock skew/latency
+                if abs((now - ts).total_seconds()) > 300:
+                    raise ValueError(f"Timestamp out of bounds (Replay Attack?): {ts} vs {now}")
+
+            # 2. Cryptographic Verification
+            # Use pre-loaded public key
+            public_key = self._public_key
+
+            # Canonicalize the asset_payload (JSON) to ensure consistent hashing
+            canonical_payload = jcs.canonicalize(asset_payload)
+
+            # Verify the signature
+            # The spec example uses PSS padding with MGF1 and SHA256
             public_key.verify(
-                bytes.fromhex(signature_hex),
+                bytes.fromhex(signature),
                 canonical_payload,
                 padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
-                hashes.SHA256()
+                hashes.SHA256(),
             )
+            logger.info("Asset verification successful.")
             return True
-        except Exception:
-            return False
+
+        except (ValueError, TypeError, InvalidSignature) as e:
+            logger.error(f"Asset verification failed: {e}")
+            raise AssetTamperedError(f"Signature verification failed: {e}") from e
 
 
 3. src/coreason_veritas/main.py
 The IP and Port are now pulled from environment variables. If they aren't set, it defaults to standard localhost, keeping the code clean.
 
 
-import os
-from contextlib import asynccontextmanager
-import httpx
-import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from .anchor import DeterminismInterceptor
-import coreason_veritas
-
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize Veritas Engine Handshake
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    Manage the lifecycle of the FastAPI application.
+    Initializes a shared HTTP client on startup and closes it on shutdown.
+    """
+    # Initialize the Veritas Engine (Auditor Handshake)
     coreason_veritas.initialize()
 
     app.state.http_client = httpx.AsyncClient()
     yield
     await app.state.http_client.aclose()
 
+
 app = FastAPI(title="CoReason Veritas Gateway", lifespan=lifespan)
+
+# Configuration from Environment Variables
 LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "https://api.openai.com/v1/chat/completions")
 
-@app.post("/v1/chat/completions")
-async def governed_inference(request: Request):
-    # Logic uses the internal package modules
+
+@app.post("/v1/chat/completions")  # type: ignore[misc]
+async def governed_inference(request: Request) -> StreamingResponse:
+    """
+    Gateway Proxy endpoint that enforces determinism and forwards requests to the LLM provider.
+    Supports streaming responses.
+    """
+    # 1. Parse Request
     raw_body = await request.json()
     headers = dict(request.headers)
 
-    # Anchor Check
+    # 2. Anchor Check: Enforce Determinism
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
-    client = request.app.state.http_client
-    # Forward essential headers
+    # 3. Proxy: Forward to LLM Provider
+    # We only forward essential headers like Authorization
     proxy_headers = {}
     if "authorization" in headers:
         proxy_headers["Authorization"] = headers["authorization"]
 
-    req = client.build_request("POST", LLM_PROVIDER_URL, json=governed_body, headers=proxy_headers)
+    client: httpx.AsyncClient = request.app.state.http_client
+
+    req = client.build_request("POST", LLM_PROVIDER_URL, json=governed_body, headers=proxy_headers, timeout=60.0)
     r = await client.send(req, stream=True)
 
     return StreamingResponse(
         r.aiter_bytes(),
         status_code=r.status_code,
-        media_type=r.headers.get("content-type")
+        media_type=r.headers.get("content-type"),
+        background=BackgroundTask(r.aclose),
     )
 
+
+# Instrument the app
 FastAPIInstrumentor.instrument_app(app)
 
-def run_server():
+
+@logger.catch  # type: ignore[misc]
+def run_server() -> None:
     """Entry point for the veritas-proxy command. Configured via ENV."""
-    # Pull config from environment, NOT hardcoded
     host = os.environ.get("VERITAS_HOST", "0.0.0.0")
     port = int(os.environ.get("VERITAS_PORT", "8080"))
     uvicorn.run(app, host=host, port=port)
@@ -300,66 +404,70 @@ def run_server():
 
 4. src/coreason_veritas/__init__.py
 Standardized entry point that initializes the auditor handshake.
-from loguru import logger
-from .auditor import IERLogger
-from .gatekeeper import SignatureValidator
-from .anchor import DeterminismInterceptor
-from .wrapper import governed_execution
 
-__version__ = "0.4.0"
-
-def initialize():
-    """Explicitly initializes the Veritas Engine and emits the handshake."""
-    try:
-        _auditor = IERLogger()
-        _auditor.emit_handshake(__version__)
-    except Exception as e:
-        logger.error(f"MACO Audit Link Failed: {e}")
+def initialize() -> None:
+    """
+    Explicitly initializes the Veritas Engine and emits the handshake audit log.
+    This should be called by the application entry point, not implicitly on import.
+    """
+    if not os.environ.get("COREASON_VERITAS_TEST_MODE"):
+        try:
+            _auditor = IERLogger()
+            _auditor.emit_handshake(__version__)
+        except Exception as e:
+            logger.error(f"MACO Audit Link Failed: {e}")
 
 5.) src/coreason_veritas/auditor.py
 This module handles the heavy lifting of connecting to the VM Vault. It is designed to be generic and environment-aware.
 
-import os
-import platform
-from loguru import logger
-from opentelemetry import trace, _logs
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk._logs import LoggerProvider
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-
 class IERLogger:
-    """Handles GxP-compliant Immutable Execution Records (IER) via OTel."""
+    """
+    Manages the connection to the OpenTelemetry collector and enforces strict
+    metadata schema for the Immutable Execution Record (IER).
+    Singleton pattern ensures global providers are initialized only once.
+    """
 
-    def __init__(self):
-        # 1. Resource Attributes: Generic metadata for client portability
-        resource = Resource.create({
-            "service.name": os.environ.get("OTEL_SERVICE_NAME", "coreason-veritas"),
-            "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
-            "host.name": platform.node()
-        })
+    _instance: Optional["IERLogger"] = None
 
-        # 2. Setup Tracing (for AI workflow logic)
-        tp = TracerProvider(resource=resource)
-        # Endpoint is pulled automatically from OTEL_EXPORTER_OTLP_ENDPOINT
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-        trace.set_tracer_provider(tp)
-        self.tracer = trace.get_tracer("veritas.audit")
+    _service_name: str
+    _sinks: List[Callable[[Dict[str, Any]], None]]
+    tracer: trace.Tracer
 
-        # 3. Setup Logging (for the Handshake and IER events)
-        lp = LoggerProvider(resource=resource)
-        _logs.set_logger_provider(lp)
-        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+    def __new__(cls, service_name: str = "coreason-veritas") -> "IERLogger":
+        if cls._instance is not None:
+            if cls._instance._service_name != service_name:
+                logger.warning(
+                    f"IERLogger already initialized with service_name='{cls._instance._service_name}'. "
+                    f"Ignoring new service_name='{service_name}'."
+                )
+            return cls._instance
 
-        # Configure Loguru to use OTel Sink (conceptual)
-        # configure_logging()
+        self = super(IERLogger, cls).__new__(cls)
+        self._service_name = service_name
+        self._initialize_providers()
+        self._sinks = []
 
-    def emit_handshake(self, version: str):
-        """Standardized GxP audit trail for package initialization."""
-        logger.bind(
-            co_veritas_version=version,
-            co_governance_status="active"
-        ).info("Veritas Engine Initialized")
+        cls._instance = self
+        return self
+
+    def _initialize_providers(self) -> None:
+        """Initialize OpenTelemetry providers."""
+        resource = Resource.create(
+            {
+                "service.name": os.environ.get("OTEL_SERVICE_NAME", self._service_name),
+                "deployment.environment": os.environ.get("DEPLOYMENT_ENV", "local-vibe"),
+                "host.name": platform.node(),
+            }
+        )
+        # ... (Provider setup) ...
+        configure_logging()
+
+    def emit_handshake(self, version: str) -> None:
+        """
+        Standardized GxP audit trail for package initialization.
+
+        Args:
+            version: The version string of the package.
+        """
+        # Unified logging via Loguru
+        logger.bind(co_veritas_version=version, co_governance_status="active").info("Veritas Engine Initialized")
