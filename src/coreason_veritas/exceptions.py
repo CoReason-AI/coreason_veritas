@@ -9,7 +9,25 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 
-class AssetTamperedError(Exception):
+class VeritasError(Exception):
+    """Base exception for all Veritas errors."""
+
+    pass
+
+
+class AssetTamperedError(VeritasError):
     """Raised when asset verification fails."""
+
+    pass
+
+
+class QuotaExceededError(VeritasError):
+    """Raised when a user or entity exceeds their daily financial quota."""
+
+    pass
+
+
+class CircuitOpenError(VeritasError):
+    """Raised when the circuit breaker is open and refusing execution."""
 
     pass
