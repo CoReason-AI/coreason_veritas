@@ -11,6 +11,7 @@
 import contextlib
 import os
 import platform
+import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generator, List, Optional
 
@@ -45,27 +46,29 @@ class IERLogger:
     """
 
     _instance: Optional["IERLogger"] = None
+    _lock: threading.Lock = threading.Lock()
 
     _service_name: str
     _sinks: List[Callable[[Dict[str, Any]], None]]
     tracer: trace.Tracer
 
     def __new__(cls, service_name: str = "coreason-veritas") -> "IERLogger":
-        if cls._instance is not None:
-            if cls._instance._service_name != service_name:
-                logger.warning(
-                    f"IERLogger already initialized with service_name='{cls._instance._service_name}'. "
-                    f"Ignoring new service_name='{service_name}'."
-                )
-            return cls._instance
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    self = super(IERLogger, cls).__new__(cls)
+                    self._service_name = service_name
+                    self._initialize_providers()
+                    self._sinks = []
+                    cls._instance = self
 
-        self = super(IERLogger, cls).__new__(cls)
-        self._service_name = service_name
-        self._initialize_providers()
-        self._sinks = []
+        if cls._instance._service_name != service_name:
+            logger.warning(
+                f"IERLogger already initialized with service_name='{cls._instance._service_name}'. "
+                f"Ignoring new service_name='{service_name}'."
+            )
 
-        cls._instance = self
-        return self
+        return cls._instance
 
     def __init__(self, service_name: str = "coreason-veritas") -> None:
         """
