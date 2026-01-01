@@ -337,3 +337,79 @@ class TestLoggingUtils(unittest.TestCase):
                 # Expected depth=4
 
                 mock_opt.assert_called_with(depth=4, exception=None)
+
+    def test_scrub_unsortable_set(self) -> None:
+        """Test set with unsortable items (mixed types) returns as list."""
+        data = {1, "a"}  # Mixed int and str is not sortable in Py3
+        scrubbed = scrub_sensitive_data(data)
+        self.assertIsInstance(scrubbed, list)
+        self.assertEqual(len(scrubbed), 2)
+        # Order is undefined, but elements should be present
+        self.assertIn(1, scrubbed)
+        self.assertIn("a", scrubbed)
+
+    def test_scrub_custom_object(self) -> None:
+        """Test custom object with __dict__ is converted to string."""
+        class MyObj:
+            def __init__(self) -> None:
+                self.x = 1
+            def __str__(self) -> str:
+                return "MyObjString"
+
+        obj = MyObj()
+        scrubbed = scrub_sensitive_data(obj)
+        self.assertEqual(scrubbed, "MyObjString")
+
+    def test_extra_sensitive_keys_env(self) -> None:
+        """Test environment variable loading for sensitive keys via module reload."""
+        import importlib
+        import os
+        from coreason_veritas import logging_utils
+
+        # Save original state
+        original_keys = logging_utils.SENSITIVE_KEYS.copy()
+        original_env = os.environ.get("VERITAS_SENSITIVE_KEYS")
+
+        try:
+            # Set env var
+            os.environ["VERITAS_SENSITIVE_KEYS"] = "env_secret_1, env_secret_2"
+
+            # Reload module to trigger the top-level code
+            importlib.reload(logging_utils)
+
+            self.assertIn("env_secret_1", logging_utils.SENSITIVE_KEYS)
+            self.assertIn("env_secret_2", logging_utils.SENSITIVE_KEYS)
+
+        finally:
+            # Restore env
+            if original_env is None:
+                del os.environ["VERITAS_SENSITIVE_KEYS"]
+            else:
+                os.environ["VERITAS_SENSITIVE_KEYS"] = original_env
+
+            # Restore module state (reload again)
+            importlib.reload(logging_utils)
+            # Restore the exact set object if needed (reload creates a new one, which is fine)
+            # But we want to ensure other tests aren't affected by "env_secret_1" if reload failed?
+            # Reloading with original env should reset it.
+
+    def test_max_depth_truncation(self) -> None:
+        """Test that recursion stops at max_depth."""
+        # Create a deep structure
+        root: Dict[str, Any] = {}
+        curr = root
+        for i in range(25):
+            curr["next"] = {}
+            curr = curr["next"]
+
+        # Default max_depth is 20
+        scrubbed = scrub_sensitive_data(root)
+
+        # Traverse to check truncation
+        curr = scrubbed
+        depth = 0
+        while isinstance(curr, dict) and "next" in curr:
+            curr = curr["next"]
+            depth += 1
+
+        self.assertEqual(curr, "[TRUNCATED_DEPTH]")
