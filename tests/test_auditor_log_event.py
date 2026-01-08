@@ -15,7 +15,7 @@ import pytest
 from coreason_veritas.auditor import IERLogger
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_log_event_success() -> None:
     auditor = IERLogger()
 
@@ -30,7 +30,7 @@ async def test_log_event_success() -> None:
         mock_logger.bind.return_value.info.assert_called_once_with("Audit Event: EXECUTION_START")
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_log_event_empty_details() -> None:
     auditor = IERLogger()
 
