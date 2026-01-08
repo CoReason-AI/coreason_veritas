@@ -208,6 +208,16 @@ class IERLogger:
         with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
             yield span
 
+    async def log_event(self, event_type: str, details: Dict[str, Any]) -> None:
+        """
+        Logs a generic audit event.
+
+        Args:
+            event_type: The type of the event (e.g., "EXECUTION_START").
+            details: A dictionary containing event details.
+        """
+        logger.bind(event_type=event_type, **details).info(f"Audit Event: {event_type}")
+
     def log_llm_transaction(
         self,
         trace_id: str,
