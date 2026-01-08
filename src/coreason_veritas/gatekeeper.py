@@ -99,3 +99,12 @@ class SignatureValidator:
         except (ValueError, TypeError, InvalidSignature) as e:
             logger.error(f"Asset verification failed: {e}")
             raise AssetTamperedError(f"Signature verification failed: {e}") from e
+
+    def get_policy_instruction_for_llm(self) -> list[str]:
+        """
+        Returns a list of governance policies to be injected into the LLM prompt.
+
+        Returns:
+            list[str]: A list of policy strings.
+        """
+        return ["No use of 'eval'"]
