@@ -11,12 +11,12 @@
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Generator, Type
+from typing import Generator
 
 import pytest
 import requests
 import urllib3
-from requests.exceptions import ConnectTimeout, ReadTimeout
+from requests.exceptions import ReadTimeout
 
 
 class MockServerHandler(BaseHTTPRequestHandler):
@@ -44,7 +44,7 @@ class MockServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"OK")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="module")  # type: ignore[misc]
 def mock_server() -> Generator[str, None, None]:
     """
     Starts a background HTTP server for testing requests/urllib3 integration.
@@ -64,7 +64,7 @@ def mock_server() -> Generator[str, None, None]:
 
 def test_urllib3_version() -> None:
     """Verify that the loaded urllib3 version is at least 2.6.3."""
-    assert urllib3.__version__ >= "2.6.3"
+    assert urllib3.__version__ >= "2.6.3"  # type: ignore[attr-defined]
 
 
 def test_requests_integration_basic(mock_server: str) -> None:
