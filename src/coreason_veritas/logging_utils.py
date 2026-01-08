@@ -200,7 +200,7 @@ class InterceptHandler(logging.Handler):
         try:
             level = logger.level(record.levelname).name
         except ValueError:
-            level = str(record.levelno)
+            level = record.levelno
 
         # Find caller from where originated the logged message
         frame: Optional[FrameType] = logging.currentframe()
