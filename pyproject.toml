@@ -38,6 +38,7 @@ jcs = "^0.2.1"
 presidio-analyzer = "^2.2.355"
 spacy = "^3.7.2"
 redis = "^7.1.0"
+urllib3 = "^2.6.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.2.2"
