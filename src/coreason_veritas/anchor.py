@@ -78,7 +78,7 @@ class DeterminismInterceptor:
                 raise ValueError("COREASON_VERITAS_PRIVATE_KEY environment variable is not set or invalid.")
 
         canonical_payload = jcs.canonicalize(artifact)
-        signature = self._private_key.sign(  # type: ignore[attr-defined]
+        signature = self._private_key.sign(
             canonical_payload,
             padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
             hashes.SHA256(),
