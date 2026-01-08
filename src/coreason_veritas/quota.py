@@ -10,7 +10,7 @@
 
 import datetime
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis  # type: ignore[import-untyped]
 
 from coreason_veritas.exceptions import QuotaExceededError
 

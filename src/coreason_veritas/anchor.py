@@ -12,8 +12,11 @@ import contextlib
 import copy
 import os
 from contextvars import ContextVar
-from typing import Any, Dict, Generator
+from typing import Any, Dict, Generator, cast
 
+import jcs
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 from loguru import logger
 
 # Context variable to track if the Anchor is active
@@ -30,6 +33,58 @@ class DeterminismInterceptor:
     Acts as a proxy/hook into the LLM Client configuration.
     Enforces the 'Lobotomy' Protocol for epistemic integrity.
     """
+
+    def __init__(self) -> None:
+        """
+        Initialize the DeterminismInterceptor.
+        Loads the private key from the environment if available.
+        """
+        self._private_key: Any = None
+        self._load_private_key()
+
+    def _load_private_key(self) -> None:
+        """Helper to load the private key from the environment variable."""
+        private_key_pem = os.getenv("COREASON_VERITAS_PRIVATE_KEY")
+        if private_key_pem:
+            try:
+                self._private_key = serialization.load_pem_private_key(
+                    private_key_pem.encode(),
+                    password=None,
+                )
+            except Exception as e:
+                logger.error(f"Failed to load private key: {e}")
+                # We don't raise here to allow instantiation even if key is bad/missing,
+                # but seal() will fail.
+
+    def seal(self, artifact: Dict[str, Any]) -> str:
+        """
+        Cryptographically signs the provided artifact and returns a signature string.
+        The artifact is first canonicalized using JCS.
+        The signature is generated using the private key from COREASON_VERITAS_PRIVATE_KEY.
+
+        Args:
+            artifact: The dictionary artifact to sign.
+
+        Returns:
+            The hex-encoded signature string.
+
+        Raises:
+            ValueError: If the private key environment variable is missing.
+        """
+        if self._private_key is None:
+            # Try reloading in case env var was set after init (e.g. during tests or late config)
+            self._load_private_key()
+            if self._private_key is None:
+                raise ValueError("COREASON_VERITAS_PRIVATE_KEY environment variable is not set or invalid.")
+
+        canonical_payload = jcs.canonicalize(artifact)
+        signature = self._private_key.sign(
+            canonical_payload,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256(),
+        )
+
+        return cast(str, signature.hex())
 
     @staticmethod
     def enforce_config(raw_config: Dict[str, Any]) -> Dict[str, Any]:
