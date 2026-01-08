@@ -14,9 +14,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Generator
 
 import pytest
-import requests
+import requests  # type: ignore[import-untyped]
 import urllib3
-from requests.exceptions import ReadTimeout
+from requests.exceptions import ReadTimeout  # type: ignore[import-untyped]
 
 
 class MockServerHandler(BaseHTTPRequestHandler):
@@ -64,7 +64,7 @@ def mock_server() -> Generator[str, None, None]:
 
 def test_urllib3_version() -> None:
     """Verify that the loaded urllib3 version is at least 2.6.3."""
-    assert urllib3.__version__ >= "2.6.3"  # type: ignore[attr-defined]
+    assert urllib3.__version__ >= "2.6.3"
 
 
 def test_requests_integration_basic(mock_server: str) -> None:
