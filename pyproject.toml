@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "coreason-veritas"
-version = "0.6.0"
+version = "0.2.0"
 description = "coreason_veritas is the non-negotiable governance layer of the CoReason platform (Prosperity Public License 3.0.0)"
 authors = ["Gowtham A Rao <gowtham.rao@coreason.ai>"]
 license = "Proprietary"
