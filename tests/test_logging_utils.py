@@ -303,8 +303,8 @@ class TestLoggingUtils(unittest.TestCase):
             with patch.object(logger, "level", side_effect=ValueError):
                 handler.emit(mock_record_custom)
 
-            # Verify Loguru was called with string "99"
-            mock_log_func.assert_called_with("99", "Custom Msg")
+        # Verify Loguru was called with int 99
+        mock_log_func.assert_called_with(99, "Custom Msg")
 
         # Test 3: Stack Depth Adjustment
         # Simulate stack inside logging module
