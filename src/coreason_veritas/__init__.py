@@ -18,7 +18,7 @@ from loguru import logger
 
 from .anchor import DeterminismInterceptor
 from .auditor import IERLogger
-from .gatekeeper import SignatureValidator
+from .gatekeeper import PolicyGuard, SignatureValidator
 from .quota import QuotaGuard
 from .resilience import AsyncCircuitBreaker
 from .sanitizer import scrub_pii_payload, scrub_pii_recursive
@@ -30,6 +30,7 @@ __email__ = "gowtham.rao@coreason.ai"
 
 __all__ = [
     "governed_execution",
+    "PolicyGuard",
     "SignatureValidator",
     "DeterminismInterceptor",
     "scrub_pii_payload",
