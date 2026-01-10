@@ -9,16 +9,19 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import pytest
-from coreason_veritas.gatekeeper import PolicyGuard
-from coreason_veritas.exceptions import ComplianceViolationError
 
-def test_verify_access_allowed():
+from coreason_veritas.exceptions import ComplianceViolationError
+from coreason_veritas.gatekeeper import PolicyGuard
+
+
+def test_verify_access_allowed() -> None:
     """Test successful access verification for a valid user."""
     guard = PolicyGuard()
     user_context = {"user_id": "valid_user", "role": "admin"}
     assert guard.verify_access("agent_123", user_context) is True
 
-def test_verify_access_denied_blocklist():
+
+def test_verify_access_denied_blocklist() -> None:
     """Test access verification fails for a blocklisted user."""
     guard = PolicyGuard(blocklist=["blocked_user"])
     user_context = {"user_id": "blocked_user", "role": "user"}
@@ -28,7 +31,8 @@ def test_verify_access_denied_blocklist():
 
     assert "Access denied" in str(excinfo.value)
 
-def test_verify_access_missing_user_id():
+
+def test_verify_access_missing_user_id() -> None:
     """Test verification fails gracefully (or handled appropriately) when user_id is missing."""
     guard = PolicyGuard()
     user_context = {"role": "user"}
@@ -40,7 +44,8 @@ def test_verify_access_missing_user_id():
 
     assert "Missing 'user_id'" in str(excinfo.value)
 
-def test_verify_access_empty_context():
+
+def test_verify_access_empty_context() -> None:
     """Test verification with empty context."""
     guard = PolicyGuard()
     with pytest.raises(ValueError, match="Missing 'user_id'"):
