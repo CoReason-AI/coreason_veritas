@@ -9,7 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import jcs
 from cryptography.exceptions import InvalidSignature
@@ -17,7 +17,51 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from loguru import logger
 
-from coreason_veritas.exceptions import AssetTamperedError
+from coreason_veritas.exceptions import AssetTamperedError, ComplianceViolationError
+
+
+class PolicyGuard:
+    """
+    Enforces governance and access control policies for Agent Execution.
+    """
+
+    def __init__(self, blocklist: List[str] | None = None) -> None:
+        """
+        Initialize the PolicyGuard.
+
+        Args:
+            blocklist: A list of user IDs to block. Defaults to None.
+        """
+        # Future extensibility: Initialize connection to OPA, Database, or load policy files here.
+        self.blocklist = blocklist or []
+
+    def verify_access(self, agent_id: str, user_context: Dict[str, Any]) -> bool:
+        """
+        Verifies if a user is authorized to execute a specific agent.
+
+        Args:
+            agent_id: The unique identifier of the agent.
+            user_context: Context containing user details (e.g., 'user_id', 'role').
+
+        Returns:
+            bool: True if access is allowed.
+
+        Raises:
+            ComplianceViolationError: If access is denied.
+            ValueError: If user_context is invalid.
+        """
+        user_id = user_context.get("user_id")
+        if not user_id:
+            raise ValueError("Missing 'user_id' in user_context")
+
+        # Basic Check Logic (Extensible)
+        # TODO: Replace with OPA or Database lookup
+        if user_id in self.blocklist:
+            logger.warning(f"Access denied for user '{user_id}' on agent '{agent_id}'")
+            raise ComplianceViolationError(f"Access denied: User '{user_id}' is restricted.")
+
+        logger.info(f"Access allowed for user '{user_id}' on agent '{agent_id}'")
+        return True
 
 
 class SignatureValidator:
