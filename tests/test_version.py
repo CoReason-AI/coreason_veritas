@@ -10,7 +10,9 @@
 
 import tomllib
 from pathlib import Path
+
 import coreason_veritas
+
 
 def test_version_sync() -> None:
     """
