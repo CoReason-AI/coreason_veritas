@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "coreason-veritas"
-version = "0.8.0"
+version = "0.9.0"
 description = "coreason_veritas is the non-negotiable governance layer of the CoReason platform (Prosperity Public License 3.0.0)"
 authors = ["Gowtham A Rao <gowtham.rao@coreason.ai>"]
 license = "Proprietary"
@@ -31,6 +31,7 @@ cryptography = "^46.0.3"
 opentelemetry-api = "^1.39.1"
 fastapi = "^0.128.0"
 uvicorn = "^0.40.0"
+coreason-validator = "^0.4.0"
 httpx = "^0.28.1"
 opentelemetry-exporter-otlp = "^1.39.1"
 opentelemetry-instrumentation-fastapi = "^0.60b1"
