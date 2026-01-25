@@ -22,7 +22,7 @@ class AuditResponse(BaseModel):  # type: ignore[misc]
     reason: str
 
 
-@app.exception_handler(Exception)
+@app.exception_handler(Exception)  # type: ignore[misc]
 async def fail_closed_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Global exception handler to ensure Fail-Closed behavior.
