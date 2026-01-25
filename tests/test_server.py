@@ -64,3 +64,57 @@ def test_audit_fail_both() -> None:
     data = response.json()
     assert data["detail"]["status"] == "REJECTED"
     assert "RAW" in data["detail"]["reason"]
+
+
+# --- Edge Cases ---
+
+
+def test_validation_error_missing_fields() -> None:
+    payload = {"source_urn": "urn:job:123"}  # Missing enrichment_level
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 422  # FastAPI validation error
+
+
+def test_validation_error_empty_payload() -> None:
+    response = client.post("/audit/artifact", json={})
+    assert response.status_code == 422
+
+
+def test_extra_fields_ignored() -> None:
+    # Pydantic defaults to ignoring extra fields unless configured otherwise
+    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123", "extra_field": "malicious_payload"}
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "APPROVED"
+
+
+def test_malformed_urn_just_prefix() -> None:
+    # urn:job: is allowed by startswith logic?
+    # Logic is `startswith("urn:job:")`. So just "urn:job:" is allowed.
+    # This might be an edge case behavior to verify.
+    # The requirement says "starts with urn:job:". It doesn't imply it must have characters after.
+    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:"}
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 200
+
+
+def test_malformed_urn_almost_prefix() -> None:
+    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job"}  # Missing colon
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 403
+
+
+def test_injection_attempt_in_urn() -> None:
+    # SQL-like injection string, should be treated as literal string
+    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123; DROP TABLE users;"}
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 200  # It starts with urn:job:, so it passes policy.
+    # This is correct behavior unless stricter URN validation is added.
+
+
+def test_large_payload() -> None:
+    # Very long URN
+    long_urn = "urn:job:" + "a" * 10000
+    payload = {"enrichment_level": "TAGGED", "source_urn": long_urn}
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 200
