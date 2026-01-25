@@ -22,53 +22,43 @@ from coreason_veritas.server import app  # noqa: E402
 
 client = TestClient(app)
 
+
 def test_audit_valid_artifact_tagged() -> None:
-    payload = {
-        "enrichment_level": "TAGGED",
-        "source_urn": "urn:job:101-alpha"
-    }
+    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:101-alpha"}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200
     assert response.json() == {"status": "APPROVED", "reason": "All checks passed."}
+
 
 def test_audit_valid_artifact_linked() -> None:
-    payload = {
-        "enrichment_level": "LINKED",
-        "source_urn": "urn:job:production-123"
-    }
+    payload = {"enrichment_level": "LINKED", "source_urn": "urn:job:production-123"}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200
     assert response.json() == {"status": "APPROVED", "reason": "All checks passed."}
 
+
 def test_audit_fail_enrichment_raw() -> None:
-    payload = {
-        "enrichment_level": "RAW",
-        "source_urn": "urn:job:101-alpha"
-    }
+    payload = {"enrichment_level": "RAW", "source_urn": "urn:job:101-alpha"}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
     data = response.json()
     assert data["detail"]["status"] == "REJECTED"
     assert "RAW" in data["detail"]["reason"]
 
+
 def test_audit_fail_provenance() -> None:
-    payload = {
-        "enrichment_level": "LINKED",
-        "source_urn": "urn:user:bob"
-    }
+    payload = {"enrichment_level": "LINKED", "source_urn": "urn:user:bob"}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
     data = response.json()
     assert data["detail"]["status"] == "REJECTED"
     assert "start with 'urn:job:'" in data["detail"]["reason"]
 
+
 def test_audit_fail_both() -> None:
     # Provenance check is second, but Enrichment is first.
     # It should fail on enrichment first.
-    payload = {
-        "enrichment_level": "RAW",
-        "source_urn": "urn:user:bob"
-    }
+    payload = {"enrichment_level": "RAW", "source_urn": "urn:user:bob"}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
     data = response.json()

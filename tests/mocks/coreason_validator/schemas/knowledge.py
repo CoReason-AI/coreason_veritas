@@ -8,6 +8,7 @@ class EnrichmentLevel(str, Enum):
     TAGGED = "TAGGED"
     LINKED = "LINKED"
 
+
 class KnowledgeArtifact(BaseModel):  # type: ignore[misc]
     enrichment_level: EnrichmentLevel
     source_urn: str

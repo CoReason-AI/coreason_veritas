@@ -15,9 +15,11 @@ from pydantic import BaseModel
 
 app = FastAPI(title="CoReason Veritas Governance Microservice")
 
+
 class AuditResponse(BaseModel):  # type: ignore[misc]
     status: str
     reason: str
+
 
 @app.post("/audit/artifact", response_model=AuditResponse)  # type: ignore[misc]
 async def audit_artifact(artifact: KnowledgeArtifact) -> AuditResponse:
@@ -33,37 +35,25 @@ async def audit_artifact(artifact: KnowledgeArtifact) -> AuditResponse:
     level = str(artifact.enrichment_level)
     if level == "EnrichmentLevel.RAW" or level == "RAW":
         reason = "Artifact enrichment level is RAW. Must be TAGGED or LINKED."
-        logger.bind(
-            source_urn=artifact.source_urn,
-            policy_id="104-MANDATORY-ENRICHMENT",
-            decision="REJECTED"
-        ).warning(reason)
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"status": "REJECTED", "reason": reason}
+        logger.bind(source_urn=artifact.source_urn, policy_id="104-MANDATORY-ENRICHMENT", decision="REJECTED").warning(
+            reason
         )
+
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
 
     # Policy 2: Provenance
     # source_urn must start with "urn:job:"
     if not artifact.source_urn.startswith("urn:job:"):
         reason = f"Artifact source_urn '{artifact.source_urn}' does not start with 'urn:job:'."
-        logger.bind(
-            source_urn=artifact.source_urn,
-            policy_id="105-PROVENANCE-CHECK",
-            decision="REJECTED"
-        ).warning(reason)
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"status": "REJECTED", "reason": reason}
+        logger.bind(source_urn=artifact.source_urn, policy_id="105-PROVENANCE-CHECK", decision="REJECTED").warning(
+            reason
         )
 
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
+
     # If all checks pass
-    logger.bind(
-        source_urn=artifact.source_urn,
-        policy_id="ALL-PASSED",
-        decision="APPROVED"
-    ).info("Artifact passed all audit checks.")
+    logger.bind(source_urn=artifact.source_urn, policy_id="ALL-PASSED", decision="APPROVED").info(
+        "Artifact passed all audit checks."
+    )
 
     return AuditResponse(status="APPROVED", reason="All checks passed.")
