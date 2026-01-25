@@ -9,7 +9,6 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import sys
-import os
 from pathlib import Path
 
 # Inject mock package into sys.path so coreason_validator can be imported
@@ -17,12 +16,13 @@ from pathlib import Path
 MOCK_DIR = Path(__file__).parent / "mocks"
 sys.path.insert(0, str(MOCK_DIR))
 
-from fastapi.testclient import TestClient
-from coreason_veritas.server import app
+from fastapi.testclient import TestClient  # noqa: E402
+
+from coreason_veritas.server import app  # noqa: E402
 
 client = TestClient(app)
 
-def test_audit_valid_artifact_tagged():
+def test_audit_valid_artifact_tagged() -> None:
     payload = {
         "enrichment_level": "TAGGED",
         "source_urn": "urn:job:101-alpha"
@@ -31,7 +31,7 @@ def test_audit_valid_artifact_tagged():
     assert response.status_code == 200
     assert response.json() == {"status": "APPROVED", "reason": "All checks passed."}
 
-def test_audit_valid_artifact_linked():
+def test_audit_valid_artifact_linked() -> None:
     payload = {
         "enrichment_level": "LINKED",
         "source_urn": "urn:job:production-123"
@@ -40,7 +40,7 @@ def test_audit_valid_artifact_linked():
     assert response.status_code == 200
     assert response.json() == {"status": "APPROVED", "reason": "All checks passed."}
 
-def test_audit_fail_enrichment_raw():
+def test_audit_fail_enrichment_raw() -> None:
     payload = {
         "enrichment_level": "RAW",
         "source_urn": "urn:job:101-alpha"
@@ -51,7 +51,7 @@ def test_audit_fail_enrichment_raw():
     assert data["detail"]["status"] == "REJECTED"
     assert "RAW" in data["detail"]["reason"]
 
-def test_audit_fail_provenance():
+def test_audit_fail_provenance() -> None:
     payload = {
         "enrichment_level": "LINKED",
         "source_urn": "urn:user:bob"
@@ -62,7 +62,7 @@ def test_audit_fail_provenance():
     assert data["detail"]["status"] == "REJECTED"
     assert "start with 'urn:job:'" in data["detail"]["reason"]
 
-def test_audit_fail_both():
+def test_audit_fail_both() -> None:
     # Provenance check is second, but Enrichment is first.
     # It should fail on enrichment first.
     payload = {

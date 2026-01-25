@@ -8,18 +8,18 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+from coreason_validator.schemas.knowledge import KnowledgeArtifact
 from fastapi import FastAPI, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
-from coreason_validator.schemas.knowledge import KnowledgeArtifact
 
 app = FastAPI(title="CoReason Veritas Governance Microservice")
 
-class AuditResponse(BaseModel):
+class AuditResponse(BaseModel):  # type: ignore[misc]
     status: str
     reason: str
 
-@app.post("/audit/artifact", response_model=AuditResponse)
+@app.post("/audit/artifact", response_model=AuditResponse)  # type: ignore[misc]
 async def audit_artifact(artifact: KnowledgeArtifact) -> AuditResponse:
     """
     Audits a KnowledgeArtifact against strict governance policies.
