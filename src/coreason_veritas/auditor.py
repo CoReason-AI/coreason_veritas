@@ -230,7 +230,7 @@ class IERLogger:
 
         if user_context:
             # Populate actor from email or user_id
-            actor = getattr(user_context, "email", None) or getattr(user_context, "user_id", "unknown")
+            actor = getattr(user_context, "email", None) or getattr(user_context, "user_id", None) or "unknown"
             safe_details["actor"] = str(actor)
 
             # Populate metadata
