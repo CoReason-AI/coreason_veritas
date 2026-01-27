@@ -37,6 +37,11 @@ from opentelemetry.trace import ProxyTracerProvider
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.logging_utils import configure_logging
 
+try:
+    from coreason_identity.models import UserContext
+except ImportError:
+    UserContext = Any
+
 
 class IERLogger:
     """
@@ -207,6 +212,35 @@ class IERLogger:
 
         with self.tracer.start_as_current_span(name, attributes=span_attributes) as span:
             yield span
+
+    def log_action(
+        self,
+        action: str,
+        details: Dict[str, Any],
+        user_context: Optional[UserContext] = None,
+    ) -> None:
+        """
+        Logs an action with Identity-Aware context.
+        Enforces clean-room logging by stripping downstream tokens and populating actor metadata.
+        """
+        safe_details = details.copy()
+
+        # Explicitly remove dangerous keys if present
+        safe_details.pop("downstream_token", None)
+
+        if user_context:
+            # Populate actor from email or user_id
+            actor = getattr(user_context, "email", None) or getattr(user_context, "user_id", None) or "unknown"
+            safe_details["actor"] = str(actor)
+
+            # Populate metadata
+            if hasattr(user_context, "groups") and user_context.groups:
+                safe_details["groups"] = user_context.groups
+            if hasattr(user_context, "claims") and user_context.claims:
+                safe_details["claims"] = user_context.claims
+
+        # Sync logging for wrapper compatibility
+        logger.bind(event_type=action, **safe_details).info(f"Audit Event: {action}")
 
     async def log_event(self, event_type: str, details: Dict[str, Any]) -> None:
         """

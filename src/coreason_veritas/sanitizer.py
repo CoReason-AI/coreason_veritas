@@ -152,19 +152,39 @@ def scrub_pii_recursive(data: Any) -> Any:
             continue  # pragma: no cover
 
         for k, v in iterator:
-            if isinstance(v, str):
-                target[k] = scrub_pii_payload(v)
-            elif isinstance(v, (dict, list, tuple)):
-                # Check cycle
-                if id(v) in memo:
-                    target[k] = memo[id(v)]
+            try:
+                # 1. Zero-Copy Rules (Only for dict keys)
+                if isinstance(source, dict):
+                    key_str = str(k).lower()
+
+                    # Masking Rule
+                    if any(s in key_str for s in ["token", "auth", "secret", "key", "password"]):
+                        target[k] = "***MASKED***"
+                        continue
+
+                    # Truncation Rule
+                    if any(s in key_str for s in ["content", "body", "text", "payload", "data"]):
+                        val_str = str(v)
+                        if len(val_str) > 256:
+                            target[k] = f"{val_str[:256]}... <TRUNCATED_ZERO_COPY>"
+                            continue
+
+                if isinstance(v, str):
+                    target[k] = scrub_pii_payload(v)
+                elif isinstance(v, (dict, list, tuple)):
+                    # Check cycle
+                    if id(v) in memo:
+                        target[k] = memo[id(v)]
+                    else:
+                        new_sub = _shallow_copy(v)
+                        memo[id(v)] = new_sub
+                        target[k] = new_sub
+                        stack.append((new_sub, v))
                 else:
-                    new_sub = _shallow_copy(v)
-                    memo[id(v)] = new_sub
-                    target[k] = new_sub
-                    stack.append((new_sub, v))
-            else:
-                target[k] = v
+                    target[k] = v
+            except Exception as e:
+                logger.warning(f"Sanitizer Error on key {k}: {e}")
+                target[k] = "<UNREADABLE_VALUE>"
 
     if root_is_tuple:
         return tuple(new_data)
