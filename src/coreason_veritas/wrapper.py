@@ -21,7 +21,7 @@ import coreason_veritas.anchor
 from coreason_veritas.anchor import DeterminismInterceptor
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import SignatureValidator
-from coreason_veritas.logging_utils import scrub_sensitive_data
+from coreason_veritas.sanitizer import scrub_pii_recursive
 
 
 def get_public_key_from_store() -> str:
@@ -146,6 +146,7 @@ class GovernanceContext:
         self.token_otel: Any = None
         self.token_anchor: Any = None
         self.ier_logger = IERLogger()
+        self.user_context_obj: Any = None
 
         self._prepare()
 
@@ -162,6 +163,11 @@ class GovernanceContext:
                 self.config_arg,
                 self.allow_unsigned,
             )
+
+            # Auto-capture Identity
+            if "user_context" in self.bound.arguments:
+                self.user_context_obj = self.bound.arguments["user_context"]
+
             self._log_start()
         except Exception as e:
             self._handle_error(e)
@@ -169,21 +175,26 @@ class GovernanceContext:
 
     def _log_start(self) -> None:
         if self.bound:
-            safe_args = scrub_sensitive_data(self.bound.arguments)
-            logger.bind(**self.attributes).info(
-                "Governance Execution Started", safe_payload=safe_args, function=self.func.__name__
-            )
+            safe_args = scrub_pii_recursive(self.bound.arguments)
+            details = {
+                **self.attributes,
+                "safe_payload": safe_args,
+                "function": self.func.__name__,
+            }
+            self.ier_logger.log_action("Governance Execution Started", details, self.user_context_obj)
 
     def _log_end(self, success: bool = True) -> None:
         duration_ms = (time.perf_counter() - self.start_time) * 1000
         verdict = "ALLOWED" if success else "BLOCKED"
         attrs = self.attributes or {"co.error": "PrepareGovernanceFailed"}
-        logger.bind(**attrs).info(
-            "Governance Execution Completed",
-            duration_ms=duration_ms,
-            verdict=verdict,
-            function=self.func.__name__,
-        )
+
+        details = {
+            **attrs,
+            "duration_ms": duration_ms,
+            "verdict": verdict,
+            "function": self.func.__name__,
+        }
+        self.ier_logger.log_action("Governance Execution Completed", details, self.user_context_obj)
 
     def _handle_error(self, e: Exception) -> None:
         if not self.attributes:
