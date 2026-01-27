@@ -1,12 +1,12 @@
-
 import asyncio
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from coreason_veritas.wrapper import governed_execution
 from coreason_veritas.auditor import IERLogger
+from coreason_veritas.wrapper import governed_execution
+
 
 # Define a picklable UserContext for testing
 class MockUserContext:
