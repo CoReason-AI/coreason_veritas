@@ -3,7 +3,7 @@
 Role: Governance Middleware (The "Safety Anchor")
 Context: GxP Enforcement & Immutable Audit
 Runtime: Python 3.11+
-Dependencies: opentelemetry-api, pydantic, cryptography
+Dependencies: opentelemetry-api, pydantic, cryptography, fastapi, uvicorn, opentelemetry-instrumentation-fastapi
 
 ## 1. Design Philosophy
 
