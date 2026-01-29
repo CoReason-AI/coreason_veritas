@@ -40,6 +40,7 @@ def ier_logger(mock_tracer: MagicMock) -> IERLogger:
 def test_log_llm_transaction(ier_logger: IERLogger, mock_logger_bind: MagicMock) -> None:
     """Test standard logging of LLM transaction."""
     from coreason_identity.models import UserContext
+
     mock_bound_logger = MagicMock()
     mock_logger_bind.return_value = mock_bound_logger
 

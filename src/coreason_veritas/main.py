@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 
 import httpx
 import uvicorn
+from coreason_identity.models import UserContext
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -22,7 +23,6 @@ from starlette.background import BackgroundTask
 
 import coreason_veritas
 from coreason_veritas.anchor import DeterminismInterceptor
-from coreason_identity.models import UserContext
 
 
 @asynccontextmanager
@@ -65,6 +65,7 @@ async def governed_inference(request: Request) -> StreamingResponse:
         roles=["gateway"],
         metadata={"source": "api"},
     )
+    logger.bind(gateway_user=gateway_context.user_id).debug("Gateway context active")
 
     # 4. Proxy: Forward to LLM Provider
     # We only forward essential headers like Authorization

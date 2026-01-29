@@ -51,6 +51,7 @@ def test_verify_access_non_string_user_id() -> None:
     UserContext enforces string type, so it should raise ValidationError.
     """
     from pydantic import ValidationError
+
     with pytest.raises(ValidationError):
         UserContext(user_id=123, email="test@test.com")
 

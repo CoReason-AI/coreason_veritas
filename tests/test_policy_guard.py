@@ -9,8 +9,7 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import pytest
-
-from coreason_identity.models import UserContext, SecretStr
+from coreason_identity.models import UserContext
 
 from coreason_veritas.exceptions import ComplianceViolationError
 from coreason_veritas.gatekeeper import PolicyGuard

@@ -15,6 +15,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generator, List, Optional
 
+from coreason_identity.models import UserContext
 from loguru import logger
 from opentelemetry import _logs, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -36,7 +37,6 @@ from opentelemetry.trace import ProxyTracerProvider
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.logging_utils import configure_logging
-from coreason_identity.models import UserContext
 
 
 class IERLogger:

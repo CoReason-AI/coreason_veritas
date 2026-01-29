@@ -30,6 +30,7 @@ def test_log_llm_transaction(mock_logger: MagicMock) -> None:
 
     # Test Data
     from coreason_identity.models import UserContext
+
     trace_id = "test-trace-123"
     context = UserContext(user_id="test-user-456", email="test@coreason.ai")
     project_id = "test-project-789"

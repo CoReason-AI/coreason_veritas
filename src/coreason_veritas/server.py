@@ -8,12 +8,12 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+from coreason_identity.models import UserContext
 from coreason_validator.schemas.knowledge import KnowledgeArtifact
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
-from coreason_identity.models import UserContext
 
 app = FastAPI(title="CoReason Veritas Governance Microservice")
 
