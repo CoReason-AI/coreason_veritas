@@ -39,12 +39,15 @@ def ier_logger(mock_tracer: MagicMock) -> IERLogger:
 
 def test_log_llm_transaction(ier_logger: IERLogger, mock_logger_bind: MagicMock) -> None:
     """Test standard logging of LLM transaction."""
+    from coreason_identity.models import UserContext
     mock_bound_logger = MagicMock()
     mock_logger_bind.return_value = mock_bound_logger
 
+    ctx = UserContext(user_id="user-123", email="test@coreason.ai")
+
     ier_logger.log_llm_transaction(
         trace_id="test-trace-id",
-        user_id="user-123",
+        context=ctx,
         project_id="proj-456",
         model="gpt-4",
         input_tokens=100,

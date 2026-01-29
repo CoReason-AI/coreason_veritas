@@ -36,11 +36,7 @@ from opentelemetry.trace import ProxyTracerProvider
 
 from coreason_veritas.anchor import is_anchor_active
 from coreason_veritas.logging_utils import configure_logging
-
-try:
-    from coreason_identity.models import UserContext
-except ImportError:
-    UserContext = Any
+from coreason_identity.models import UserContext
 
 
 class IERLogger:
@@ -255,7 +251,7 @@ class IERLogger:
     def log_llm_transaction(
         self,
         trace_id: str,
-        user_id: str,
+        context: UserContext,
         project_id: str,
         model: str,
         input_tokens: int,
@@ -268,7 +264,7 @@ class IERLogger:
 
         Args:
             trace_id: The request trace ID.
-            user_id: The ID of the user initiating the request.
+            context: The UserContext of the user initiating the request.
             project_id: The ID of the project/asset.
             model: The name of the model used.
             input_tokens: Number of input tokens.
@@ -283,7 +279,7 @@ class IERLogger:
                 "gen_ai.usage.input_tokens": input_tokens,
                 "gen_ai.usage.output_tokens": output_tokens,
                 "gen_ai.usage.cost": cost_usd,
-                "co.user_id": user_id,
+                "co.user_id": context.user_id,
                 "co.asset_id": project_id,
                 "trace_id": trace_id,
                 "latency_ms": latency_ms,

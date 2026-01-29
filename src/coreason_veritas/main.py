@@ -22,6 +22,7 @@ from starlette.background import BackgroundTask
 
 import coreason_veritas
 from coreason_veritas.anchor import DeterminismInterceptor
+from coreason_identity.models import UserContext
 
 
 @asynccontextmanager
@@ -57,7 +58,15 @@ async def governed_inference(request: Request) -> StreamingResponse:
     # 2. Anchor Check: Enforce Determinism
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
-    # 3. Proxy: Forward to LLM Provider
+    # 3. Instantiate Gateway Context
+    gateway_context = UserContext(
+        user_id="veritas-gateway",
+        email="gateway@coreason.ai",
+        roles=["gateway"],
+        metadata={"source": "api"},
+    )
+
+    # 4. Proxy: Forward to LLM Provider
     # We only forward essential headers like Authorization
     proxy_headers = {}
     if "authorization" in headers:

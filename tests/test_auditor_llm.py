@@ -29,8 +29,9 @@ def test_log_llm_transaction(mock_logger: MagicMock) -> None:
     auditor = IERLogger()
 
     # Test Data
+    from coreason_identity.models import UserContext
     trace_id = "test-trace-123"
-    user_id = "test-user-456"
+    context = UserContext(user_id="test-user-456", email="test@coreason.ai")
     project_id = "test-project-789"
     model = "gpt-4"
     input_tokens = 100
@@ -40,7 +41,7 @@ def test_log_llm_transaction(mock_logger: MagicMock) -> None:
 
     auditor.log_llm_transaction(
         trace_id=trace_id,
-        user_id=user_id,
+        context=context,
         project_id=project_id,
         model=model,
         input_tokens=input_tokens,
@@ -60,7 +61,7 @@ def test_log_llm_transaction(mock_logger: MagicMock) -> None:
     assert call_kwargs["gen_ai.usage.input_tokens"] == input_tokens
     assert call_kwargs["gen_ai.usage.output_tokens"] == output_tokens
     assert call_kwargs["gen_ai.usage.cost"] == cost_usd
-    assert call_kwargs["co.user_id"] == user_id
+    assert call_kwargs["co.user_id"] == context.user_id
     assert call_kwargs["co.asset_id"] == project_id
     assert call_kwargs["trace_id"] == trace_id
     assert call_kwargs["latency_ms"] == latency_ms

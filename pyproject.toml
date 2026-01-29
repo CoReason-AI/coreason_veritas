@@ -40,7 +40,7 @@ presidio-analyzer = "^2.2.355"
 spacy = "^3.7.2"
 redis = "^7.1.0"
 urllib3 = "^2.6.3"
-coreason-identity = "*"
+coreason-identity = "^0.4.1"
 anyio = "^4.12.1"
 
 [tool.poetry.group.dev.dependencies]
