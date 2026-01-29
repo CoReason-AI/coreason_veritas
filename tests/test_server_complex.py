@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 MOCK_DIR = Path(__file__).parent / "mocks"
 sys.path.insert(0, str(MOCK_DIR))
 
+import coreason_veritas.server  # noqa: E402
 from coreason_veritas.server import app, fail_closed_handler  # noqa: E402
 
 TEST_CONTEXT = {
@@ -54,10 +55,13 @@ def generate_valid_pem() -> str:
 def client() -> Generator[TestClient, None, None]:
     """Fixture to provide TestClient with mocked lifespan dependencies."""
     valid_key = generate_valid_pem()
+
+    # We patch the module attributes directly using patch.object to ensure
+    # the names resolved by lifespan() in coreason_veritas.server are replaced.
     with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
         with (
-            patch("coreason_veritas.server.SignatureValidator") as MockValidator,
-            patch("coreason_veritas.server.IERLogger") as MockLogger,
+            patch.object(coreason_veritas.server, "SignatureValidator") as MockValidator,
+            patch.object(coreason_veritas.server, "IERLogger") as MockLogger,
         ):
             # Configure Mock Validator
             MockValidator.return_value = MagicMock()
@@ -65,8 +69,6 @@ def client() -> Generator[TestClient, None, None]:
             # Configure Mock Logger
             mock_logger = MockLogger.return_value
             # app.state.logger will be this instance.
-            # We need to make sure calls to log_event don't fail.
-            # log_event is async.
             mock_logger.log_event = MagicMock()
 
             async def async_log(*args: object, **kwargs: object) -> None:
@@ -104,19 +106,20 @@ def test_fail_closed_on_crash(client: TestClient) -> None:
     # Simulate a crash by forcing the mocked logger to raise an exception.
     # The client fixture sets app.state.logger to a MagicMock.
     mock_logger = cast(MagicMock, app.state.logger)
-    original_side_effect = mock_logger.log_event.side_effect
 
-    # We want log_event to raise an exception when awaited.
-    # Since log_event is async, side_effect should return a coroutine that raises, or be an exception?
-    # If side_effect is an exception, calling the mock raises it immediately (sync).
-    # But log_event is awaited.
-    # If side_effect is an exception, the `await mock()` call will raise it?
-    # No, `await` expects an awaitable.
-    # We need side_effect to be a function that raises?
-    # Or, since it's a Mock, if we set side_effect to Exception, calling it raises.
-    # But the code does `await ier_logger.log_event(...)`.
-    # If `log_event(...)` raises sync, `await` never happens.
-    # This works for simulating a crash *before* await, which is fine for testing crash handling.
+    # Ensure log_event is a Mock object before accessing side_effect
+    # If patching failed, mock_logger might be a real object.
+    if not isinstance(mock_logger.log_event, MagicMock):
+        # If it's a real function/coroutine (e.g. patching failed), we can't set side_effect.
+        # This assertions helps debug if patching failed.
+        # But if patching works, this block is skipped.
+        # If patching failed, we force a fail here to be explicit.
+        if hasattr(mock_logger.log_event, "side_effect"):
+            pass  # It's a mock
+        else:
+            pytest.fail(f"app.state.logger.log_event is not a Mock: {type(mock_logger.log_event)}")
+
+    original_side_effect = mock_logger.log_event.side_effect
     mock_logger.log_event.side_effect = Exception("Simulated Core Crash")
 
     try:
