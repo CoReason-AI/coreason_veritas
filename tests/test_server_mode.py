@@ -63,7 +63,7 @@ def client() -> Generator[TestClient, None, None]:
 def test_health_check(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "active", "mode": "governance_sidecar", "version": "0.9.0"}
+    assert response.json() == {"status": "active", "mode": "governance_sidecar", "version": "0.12.0"}
 
 
 def test_audit_artifact_pass(client: TestClient) -> None:

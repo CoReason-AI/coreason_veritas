@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from coreason_veritas import __version__
 from coreason_veritas.auditor import IERLogger
 from coreason_veritas.gatekeeper import PolicyGuard, SignatureValidator
 
@@ -84,7 +85,7 @@ async def fail_closed_handler(request: Request, exc: Exception) -> JSONResponse:
 
 @app.get("/health")  # type: ignore[misc]
 async def health_check() -> Dict[str, str]:
-    return {"status": "active", "mode": "governance_sidecar", "version": "0.9.0"}
+    return {"status": "active", "mode": "governance_sidecar", "version": __version__}
 
 
 @app.post("/audit/artifact", response_model=AuditResponse)  # type: ignore[misc]
