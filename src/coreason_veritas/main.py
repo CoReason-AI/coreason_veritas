@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 
 import httpx
 import uvicorn
+from coreason_identity.models import UserContext
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -57,7 +58,16 @@ async def governed_inference(request: Request) -> StreamingResponse:
     # 2. Anchor Check: Enforce Determinism
     governed_body = DeterminismInterceptor.enforce_config(raw_body)
 
-    # 3. Proxy: Forward to LLM Provider
+    # 3. Instantiate Gateway Context
+    gateway_context = UserContext(
+        user_id="veritas-gateway",
+        email="gateway@coreason.ai",
+        roles=["gateway"],
+        metadata={"source": "api"},
+    )
+    logger.bind(gateway_user=gateway_context.user_id).debug("Gateway context active")
+
+    # 4. Proxy: Forward to LLM Provider
     # We only forward essential headers like Authorization
     proxy_headers = {}
     if "authorization" in headers:

@@ -23,22 +23,28 @@ from coreason_veritas.server import app  # noqa: E402
 client = TestClient(app)
 
 
+TEST_CONTEXT = {"user_id": "test_user", "email": "test@coreason.ai", "groups": [], "scopes": [], "claims": {}}
+
+
 def test_audit_valid_artifact_tagged() -> None:
-    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:101-alpha"}
+    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:101-alpha"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200
     assert response.json() == {"status": "APPROVED", "reason": "All checks passed."}
 
 
 def test_audit_valid_artifact_linked() -> None:
-    payload = {"enrichment_level": "LINKED", "source_urn": "urn:job:production-123"}
+    artifact = {"enrichment_level": "LINKED", "source_urn": "urn:job:production-123"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200
     assert response.json() == {"status": "APPROVED", "reason": "All checks passed."}
 
 
 def test_audit_fail_enrichment_raw() -> None:
-    payload = {"enrichment_level": "RAW", "source_urn": "urn:job:101-alpha"}
+    artifact = {"enrichment_level": "RAW", "source_urn": "urn:job:101-alpha"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
     data = response.json()
@@ -47,7 +53,8 @@ def test_audit_fail_enrichment_raw() -> None:
 
 
 def test_audit_fail_provenance() -> None:
-    payload = {"enrichment_level": "LINKED", "source_urn": "urn:user:bob"}
+    artifact = {"enrichment_level": "LINKED", "source_urn": "urn:user:bob"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
     data = response.json()
@@ -58,7 +65,8 @@ def test_audit_fail_provenance() -> None:
 def test_audit_fail_both() -> None:
     # Provenance check is second, but Enrichment is first.
     # It should fail on enrichment first.
-    payload = {"enrichment_level": "RAW", "source_urn": "urn:user:bob"}
+    artifact = {"enrichment_level": "RAW", "source_urn": "urn:user:bob"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
     data = response.json()
@@ -70,9 +78,18 @@ def test_audit_fail_both() -> None:
 
 
 def test_validation_error_missing_fields() -> None:
-    payload = {"source_urn": "urn:job:123"}  # Missing enrichment_level
+    # Missing enrichment_level in artifact
+    artifact = {"source_urn": "urn:job:123"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 422  # FastAPI validation error
+
+
+def test_validation_error_missing_context() -> None:
+    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:101-alpha"}
+    payload = {"artifact": artifact}  # Missing context
+    response = client.post("/audit/artifact", json=payload)
+    assert response.status_code == 422
 
 
 def test_validation_error_empty_payload() -> None:
@@ -82,7 +99,9 @@ def test_validation_error_empty_payload() -> None:
 
 def test_extra_fields_ignored() -> None:
     # Pydantic defaults to ignoring extra fields unless configured otherwise
-    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123", "extra_field": "malicious_payload"}
+    # Extra field in artifact
+    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123", "extra_field": "malicious_payload"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200
     assert response.json()["status"] == "APPROVED"
@@ -93,20 +112,23 @@ def test_malformed_urn_just_prefix() -> None:
     # Logic is `startswith("urn:job:")`. So just "urn:job:" is allowed.
     # This might be an edge case behavior to verify.
     # The requirement says "starts with urn:job:". It doesn't imply it must have characters after.
-    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:"}
+    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200
 
 
 def test_malformed_urn_almost_prefix() -> None:
-    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job"}  # Missing colon
+    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job"}  # Missing colon
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 403
 
 
 def test_injection_attempt_in_urn() -> None:
     # SQL-like injection string, should be treated as literal string
-    payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123; DROP TABLE users;"}
+    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123; DROP TABLE users;"}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200  # It starts with urn:job:, so it passes policy.
     # This is correct behavior unless stricter URN validation is added.
@@ -115,6 +137,7 @@ def test_injection_attempt_in_urn() -> None:
 def test_large_payload() -> None:
     # Very long URN
     long_urn = "urn:job:" + "a" * 10000
-    payload = {"enrichment_level": "TAGGED", "source_urn": long_urn}
+    artifact = {"enrichment_level": "TAGGED", "source_urn": long_urn}
+    payload = {"artifact": artifact, "context": TEST_CONTEXT}
     response = client.post("/audit/artifact", json=payload)
     assert response.status_code == 200

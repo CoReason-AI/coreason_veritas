@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from coreason_veritas.server import app, fail_closed_handler  # noqa: E402
 
 client = TestClient(app)
+TEST_CONTEXT = {"user_id": "test_user", "email": "test@coreason.ai", "groups": [], "scopes": [], "claims": {}}
 
 
 def test_high_volume_audit_requests() -> None:
@@ -32,13 +33,15 @@ def test_high_volume_audit_requests() -> None:
     for i in range(iterations):
         # Even: Valid
         if i % 2 == 0:
-            payload = {"enrichment_level": "TAGGED", "source_urn": f"urn:job:{i}"}
+            artifact = {"enrichment_level": "TAGGED", "source_urn": f"urn:job:{i}"}
+            payload = {"artifact": artifact, "context": TEST_CONTEXT}
             response = client.post("/audit/artifact", json=payload)
             assert response.status_code == 200, f"Failed on iteration {i} (expected success)"
             assert response.json()["status"] == "APPROVED"
         # Odd: Invalid (RAW)
         else:
-            payload = {"enrichment_level": "RAW", "source_urn": f"urn:job:{i}"}
+            artifact = {"enrichment_level": "RAW", "source_urn": f"urn:job:{i}"}
+            payload = {"artifact": artifact, "context": TEST_CONTEXT}
             response = client.post("/audit/artifact", json=payload)
             assert response.status_code == 403, f"Failed on iteration {i} (expected forbidden)"
             assert response.json()["detail"]["status"] == "REJECTED"
@@ -52,7 +55,8 @@ def test_fail_closed_on_crash() -> None:
     with patch("coreason_veritas.server.logger.bind") as mock_bind:
         mock_bind.side_effect = Exception("Simulated Core Crash")
 
-        payload = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123"}
+        artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123"}
+        payload = {"artifact": artifact, "context": TEST_CONTEXT}
         response = client.post("/audit/artifact", json=payload)
 
         # It should catch the exception and return 403
