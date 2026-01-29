@@ -16,6 +16,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 # Inject mock package into sys.path so coreason_validator can be imported
@@ -33,10 +35,24 @@ TEST_CONTEXT = {
 }
 
 
+def generate_valid_pem() -> str:
+    """Generate a valid RSA public key in PEM format."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = key.public_key()
+    pem_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    pem_str = pem_bytes.decode("utf-8")
+    assert isinstance(pem_str, str)
+    return pem_str
+
+
 @pytest.fixture  # type: ignore[misc]
 def client() -> Generator[TestClient, None, None]:
     """Fixture to provide TestClient with mocked lifespan dependencies."""
-    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": "dummy_key"}):
+    valid_key = generate_valid_pem()
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
         with (
             patch("coreason_veritas.server.SignatureValidator") as MockValidator,
             patch("coreason_veritas.server.IERLogger") as MockLogger,
@@ -119,8 +135,11 @@ async def test_concurrent_load() -> None:
     """
     from httpx import ASGITransport, AsyncClient
 
-    # Mock dependencies manually for this async test
-    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": "dummy_key"}):
+    from coreason_veritas.server import lifespan
+
+    valid_key = generate_valid_pem()
+
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
         with (
             patch("coreason_veritas.server.SignatureValidator") as MockValidator,
             patch("coreason_veritas.server.IERLogger") as MockLogger,
@@ -137,21 +156,19 @@ async def test_concurrent_load() -> None:
 
             mock_logger.log_event.side_effect = async_log
 
-            # Create 50 concurrent requests
-            # We must use the app with lifespan triggered by AsyncClient (handled by ASGITransport?)
-            # ASGITransport does NOT run lifespan by default unless you use LifespanManager?
-            # Actually, newer httpx + fastapi might run it if client context manager is used.
-            # But just in case, patching ensures it works or at least doesn't crash if it runs.
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                tasks = []
-                artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:concurrent"}
-                payload = {"artifact": artifact, "context": TEST_CONTEXT}
+            # Manually trigger lifespan context
+            # This ensures app.state is populated
+            async with lifespan(app):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    tasks = []
+                    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:concurrent"}
+                    payload = {"artifact": artifact, "context": TEST_CONTEXT}
 
-                for _ in range(50):
-                    tasks.append(ac.post("/audit/artifact", json=payload))
+                    for _ in range(50):
+                        tasks.append(ac.post("/audit/artifact", json=payload))
 
-                responses = await asyncio.gather(*tasks)
+                    responses = await asyncio.gather(*tasks)
 
-                for response in responses:
-                    assert response.status_code == 200
-                    assert response.json()["status"] == "APPROVED"
+                    for response in responses:
+                        assert response.status_code == 200
+                        assert response.json()["status"] == "APPROVED"

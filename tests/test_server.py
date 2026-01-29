@@ -15,6 +15,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 # Inject mock package into sys.path so coreason_validator can be imported
@@ -33,10 +35,25 @@ TEST_CONTEXT = {
 }
 
 
+def generate_valid_pem() -> str:
+    """Generate a valid RSA public key in PEM format."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = key.public_key()
+    pem_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    pem_str = pem_bytes.decode("utf-8")
+    assert isinstance(pem_str, str)
+    return pem_str
+
+
 @pytest.fixture  # type: ignore[misc]
 def client() -> Generator[TestClient, None, None]:
     # Mock env var and SignatureValidator/IERLogger for lifespan.
-    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": "dummy_key"}):
+    valid_key = generate_valid_pem()
+
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
         with (
             patch("coreason_veritas.server.SignatureValidator") as MockValidator,
             patch("coreason_veritas.server.IERLogger") as MockLogger,
