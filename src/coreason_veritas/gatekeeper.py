@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import jcs
+from coreason_identity.models import UserContext
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -35,7 +36,7 @@ class PolicyGuard:
         # Future extensibility: Initialize connection to OPA, Database, or load policy files here.
         self.blocklist = blocklist or []
 
-    def verify_access(self, agent_id: str, user_context: Dict[str, Any]) -> bool:
+    def verify_access(self, agent_id: str, user_context: UserContext) -> bool:
         """
         Verifies if a user is authorized to execute a specific agent.
 
@@ -50,7 +51,7 @@ class PolicyGuard:
             ComplianceViolationError: If access is denied.
             ValueError: If user_context is invalid.
         """
-        user_id = user_context.get("user_id")
+        user_id = user_context.user_id
         if not user_id:
             raise ValueError("Missing 'user_id' in user_context")
 

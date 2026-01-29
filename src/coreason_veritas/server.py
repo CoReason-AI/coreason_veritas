@@ -8,6 +8,7 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+from coreason_identity.models import UserContext
 from coreason_validator.schemas.knowledge import KnowledgeArtifact
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -37,7 +38,7 @@ async def fail_closed_handler(request: Request, exc: Exception) -> JSONResponse:
 
 
 @app.post("/audit/artifact", response_model=AuditResponse)  # type: ignore[misc]
-async def audit_artifact(artifact: KnowledgeArtifact) -> AuditResponse:
+async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> AuditResponse:
     """
     Audits a KnowledgeArtifact against strict governance policies.
     Returns APPROVED or REJECTED.
@@ -51,7 +52,10 @@ async def audit_artifact(artifact: KnowledgeArtifact) -> AuditResponse:
         if level == "EnrichmentLevel.RAW" or level == "RAW":
             reason = "Artifact enrichment level is RAW. Must be TAGGED or LINKED."
             logger.bind(
-                source_urn=artifact.source_urn, policy_id="104-MANDATORY-ENRICHMENT", decision="REJECTED"
+                user_id=context.user_id,
+                source_urn=artifact.source_urn,
+                policy_id="104-MANDATORY-ENRICHMENT",
+                decision="REJECTED",
             ).warning(reason)
 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
@@ -60,16 +64,19 @@ async def audit_artifact(artifact: KnowledgeArtifact) -> AuditResponse:
         # source_urn must start with "urn:job:"
         if not artifact.source_urn.startswith("urn:job:"):
             reason = f"Artifact source_urn '{artifact.source_urn}' does not start with 'urn:job:'."
-            logger.bind(source_urn=artifact.source_urn, policy_id="105-PROVENANCE-CHECK", decision="REJECTED").warning(
-                reason
-            )
+            logger.bind(
+                user_id=context.user_id,
+                source_urn=artifact.source_urn,
+                policy_id="105-PROVENANCE-CHECK",
+                decision="REJECTED",
+            ).warning(reason)
 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
 
         # If all checks pass
-        logger.bind(source_urn=artifact.source_urn, policy_id="ALL-PASSED", decision="APPROVED").info(
-            "Artifact passed all audit checks."
-        )
+        logger.bind(
+            user_id=context.user_id, source_urn=artifact.source_urn, policy_id="ALL-PASSED", decision="APPROVED"
+        ).info("Artifact passed all audit checks.")
 
         return AuditResponse(status="APPROVED", reason="All checks passed.")
 
