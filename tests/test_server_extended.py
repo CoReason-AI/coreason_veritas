@@ -9,10 +9,15 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import asyncio
+import os
 import sys
+from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 # Inject mock package into sys.path so coreason_validator can be imported
@@ -21,11 +26,54 @@ sys.path.insert(0, str(MOCK_DIR))
 
 from coreason_veritas.server import app  # noqa: E402
 
-client = TestClient(app)
-TEST_CONTEXT = {"user_id": "test_user", "email": "test@coreason.ai", "groups": [], "scopes": [], "claims": {}}
+TEST_CONTEXT = {
+    "user_id": "test_user",
+    "email": "test@coreason.ai",
+    "groups": [],
+    "scopes": [],
+    "claims": {},
+}
 
 
-def test_unicode_urn() -> None:
+def generate_valid_pem() -> str:
+    """Generate a valid RSA public key in PEM format."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = key.public_key()
+    pem_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    pem_str = pem_bytes.decode("utf-8")
+    assert isinstance(pem_str, str)
+    return pem_str
+
+
+@pytest.fixture  # type: ignore[misc]
+def client() -> Generator[TestClient, None, None]:
+    """Fixture to provide TestClient with mocked lifespan dependencies."""
+    valid_key = generate_valid_pem()
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
+        with (
+            patch("coreason_veritas.server.SignatureValidator") as MockValidator,
+            patch("coreason_veritas.server.IERLogger") as MockLogger,
+        ):
+            # Configure Mock Validator
+            MockValidator.return_value = MagicMock()
+
+            # Configure Mock Logger
+            mock_logger = MockLogger.return_value
+            mock_logger.log_event = MagicMock()
+
+            async def async_log(*args: object, **kwargs: object) -> None:
+                return None
+
+            mock_logger.log_event.side_effect = async_log
+
+            with TestClient(app) as test_client:
+                yield test_client
+
+
+def test_unicode_urn(client: TestClient) -> None:
     """Test handling of URNs with unicode characters."""
     # Emojis and non-latin characters
     urn = "urn:job:🚀-project-Ω"
@@ -36,7 +84,7 @@ def test_unicode_urn() -> None:
     assert response.json()["status"] == "APPROVED"
 
 
-def test_urn_whitespace_handling() -> None:
+def test_urn_whitespace_handling(client: TestClient) -> None:
     """
     Test how the server handles whitespace.
     Note: Standard startswith logic does NOT strip whitespace.
@@ -57,7 +105,7 @@ def test_urn_whitespace_handling() -> None:
     assert response_trail.status_code == 200
 
 
-def test_enum_case_sensitivity() -> None:
+def test_enum_case_sensitivity(client: TestClient) -> None:
     """Test that Enum values are case sensitive (Pydantic default behavior)."""
     # 'tagged' instead of 'TAGGED'
     artifact = {"enrichment_level": "tagged", "source_urn": "urn:job:123"}
@@ -67,7 +115,7 @@ def test_enum_case_sensitivity() -> None:
     assert response.status_code == 422
 
 
-def test_statelessness_redundancy() -> None:
+def test_statelessness_redundancy(client: TestClient) -> None:
     """Verify that repeated requests yield identical results (Stateless)."""
     artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:redundant"}
     payload = {"artifact": artifact, "context": TEST_CONTEXT}
@@ -87,17 +135,40 @@ async def test_concurrent_load() -> None:
     """
     from httpx import ASGITransport, AsyncClient
 
-    # Create 50 concurrent requests
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        tasks = []
-        artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:concurrent"}
-        payload = {"artifact": artifact, "context": TEST_CONTEXT}
+    from coreason_veritas.server import lifespan
 
-        for _ in range(50):
-            tasks.append(ac.post("/audit/artifact", json=payload))
+    valid_key = generate_valid_pem()
 
-        responses = await asyncio.gather(*tasks)
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
+        with (
+            patch("coreason_veritas.server.SignatureValidator") as MockValidator,
+            patch("coreason_veritas.server.IERLogger") as MockLogger,
+        ):
+            # Configure Mock Validator
+            MockValidator.return_value = MagicMock()
 
-        for response in responses:
-            assert response.status_code == 200
-            assert response.json()["status"] == "APPROVED"
+            # Configure Mock Logger
+            mock_logger = MockLogger.return_value
+            mock_logger.log_event = MagicMock()
+
+            async def async_log(*args: object, **kwargs: object) -> None:
+                return None
+
+            mock_logger.log_event.side_effect = async_log
+
+            # Manually trigger lifespan context
+            # This ensures app.state is populated
+            async with lifespan(app):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    tasks = []
+                    artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:concurrent"}
+                    payload = {"artifact": artifact, "context": TEST_CONTEXT}
+
+                    for _ in range(50):
+                        tasks.append(ac.post("/audit/artifact", json=payload))
+
+                    responses = await asyncio.gather(*tasks)
+
+                    for response in responses:
+                        assert response.status_code == 200
+                        assert response.json()["status"] == "APPROVED"

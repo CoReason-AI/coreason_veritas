@@ -19,6 +19,7 @@ nav:
   - Architecture: architecture.md
   - Security Model: security.md
   - Operations Manual: operations.md
+  - Usage Guide: usage.md
   - Cookbook: cookbook.md
   - API Reference: api.md
   - Package Specification: specification.md
