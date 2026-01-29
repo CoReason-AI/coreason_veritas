@@ -8,6 +8,10 @@
 #
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
+import os
+from contextlib import asynccontextmanager
+from typing import Dict, Any
+
 from coreason_identity.models import UserContext
 from coreason_validator.schemas.knowledge import KnowledgeArtifact
 from fastapi import FastAPI, HTTPException, Request, status
@@ -15,12 +19,53 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
-app = FastAPI(title="CoReason Veritas Governance Microservice")
+from coreason_veritas.auditor import IERLogger
+from coreason_veritas.gatekeeper import PolicyGuard, SignatureValidator
 
 
 class AuditResponse(BaseModel):  # type: ignore[misc]
     status: str
     reason: str
+
+
+class VerifyAccessRequest(BaseModel):  # type: ignore[misc]
+    user_context: UserContext
+    agent_id: str
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize Governance Singletons
+    srb_public_key = os.environ.get("COREASON_SRB_PUBLIC_KEY")
+    if not srb_public_key:
+        logger.warning("COREASON_SRB_PUBLIC_KEY not set in environment.")
+        # We allow it to proceed to let SignatureValidator handle it or fail.
+        # SignatureValidator expects a string.
+        srb_public_key = ""
+
+    # SignatureValidator
+    # This might raise if key is invalid, failing startup (Fail-Closed).
+    try:
+        app.state.validator = SignatureValidator(public_key_store=srb_public_key)
+    except Exception as e:
+        logger.error(f"Failed to initialize SignatureValidator: {e}")
+        # If strict fail-closed at startup is required:
+        # raise e
+        # But for now, we will log error. However, if validator is critical, we should probably raise.
+        # The prompt says "Store these instances...".
+        # I'll let it raise if it fails, which is standard behavior (app won't start).
+        raise e
+
+    # IERLogger
+    app.state.logger = IERLogger()
+
+    # PolicyGuard
+    app.state.policy_guard = PolicyGuard()
+
+    yield
+
+
+app = FastAPI(title="CoReason Veritas Governance Microservice", lifespan=lifespan)
 
 
 @app.exception_handler(Exception)  # type: ignore[misc]
@@ -37,6 +82,11 @@ async def fail_closed_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+@app.get("/health")  # type: ignore[misc]
+async def health_check() -> Dict[str, str]:
+    return {"status": "active", "mode": "governance_sidecar", "version": "0.9.0"}
+
+
 @app.post("/audit/artifact", response_model=AuditResponse)  # type: ignore[misc]
 async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> AuditResponse:
     """
@@ -44,6 +94,8 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
     Returns APPROVED or REJECTED.
     Fails closed with 403 Forbidden for any violations.
     """
+    ier_logger: IERLogger = app.state.logger
+
     try:
         # Policy 1: Enrichment Level
         # Must be TAGGED or LINKED. Cannot be RAW.
@@ -51,12 +103,17 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
         level = str(artifact.enrichment_level)
         if level == "EnrichmentLevel.RAW" or level == "RAW":
             reason = "Artifact enrichment level is RAW. Must be TAGGED or LINKED."
-            logger.bind(
-                user_id=context.user_id,
-                source_urn=artifact.source_urn,
-                policy_id="104-MANDATORY-ENRICHMENT",
-                decision="REJECTED",
-            ).warning(reason)
+
+            await ier_logger.log_event(
+                "AUDIT_EVENT",
+                {
+                    "user_id": context.user_id,
+                    "source_urn": artifact.source_urn,
+                    "policy_id": "104-MANDATORY-ENRICHMENT",
+                    "decision": "REJECTED",
+                    "reason": reason
+                }
+            )
 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
 
@@ -64,19 +121,30 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
         # source_urn must start with "urn:job:"
         if not artifact.source_urn.startswith("urn:job:"):
             reason = f"Artifact source_urn '{artifact.source_urn}' does not start with 'urn:job:'."
-            logger.bind(
-                user_id=context.user_id,
-                source_urn=artifact.source_urn,
-                policy_id="105-PROVENANCE-CHECK",
-                decision="REJECTED",
-            ).warning(reason)
+
+            await ier_logger.log_event(
+                "AUDIT_EVENT",
+                {
+                    "user_id": context.user_id,
+                    "source_urn": artifact.source_urn,
+                    "policy_id": "105-PROVENANCE-CHECK",
+                    "decision": "REJECTED",
+                    "reason": reason
+                }
+            )
 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
 
         # If all checks pass
-        logger.bind(
-            user_id=context.user_id, source_urn=artifact.source_urn, policy_id="ALL-PASSED", decision="APPROVED"
-        ).info("Artifact passed all audit checks.")
+        await ier_logger.log_event(
+            "AUDIT_EVENT",
+            {
+                "user_id": context.user_id,
+                "source_urn": artifact.source_urn,
+                "policy_id": "ALL-PASSED",
+                "decision": "APPROVED"
+            }
+        )
 
         return AuditResponse(status="APPROVED", reason="All checks passed.")
 
@@ -91,3 +159,18 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"status": "REJECTED", "reason": "Internal Audit Logic Crash"},
         ) from e
+
+
+@app.post("/verify/access")  # type: ignore[misc]
+async def verify_access(request: VerifyAccessRequest) -> JSONResponse:
+    """
+    Verifies if a user is authorized to execute a specific agent.
+    """
+    policy_guard: PolicyGuard = app.state.policy_guard
+    try:
+        # verify_access returns True if allowed, or raises exception.
+        policy_guard.verify_access(request.agent_id, request.user_context)
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "ALLOWED"})
+    except Exception as e:
+        logger.warning(f"Access denied: {e}")
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"status": "DENIED", "reason": str(e)})
