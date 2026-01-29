@@ -10,7 +10,7 @@
 
 import os
 from contextlib import asynccontextmanager
-from typing import Dict, Any
+from typing import AsyncIterator, Dict
 
 from coreason_identity.models import UserContext
 from coreason_validator.schemas.knowledge import KnowledgeArtifact
@@ -34,7 +34,7 @@ class VerifyAccessRequest(BaseModel):  # type: ignore[misc]
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize Governance Singletons
     srb_public_key = os.environ.get("COREASON_SRB_PUBLIC_KEY")
     if not srb_public_key:
@@ -111,8 +111,8 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
                     "source_urn": artifact.source_urn,
                     "policy_id": "104-MANDATORY-ENRICHMENT",
                     "decision": "REJECTED",
-                    "reason": reason
-                }
+                    "reason": reason,
+                },
             )
 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
@@ -129,8 +129,8 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
                     "source_urn": artifact.source_urn,
                     "policy_id": "105-PROVENANCE-CHECK",
                     "decision": "REJECTED",
-                    "reason": reason
-                }
+                    "reason": reason,
+                },
             )
 
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"status": "REJECTED", "reason": reason})
@@ -142,8 +142,8 @@ async def audit_artifact(artifact: KnowledgeArtifact, context: UserContext) -> A
                 "user_id": context.user_id,
                 "source_urn": artifact.source_urn,
                 "policy_id": "ALL-PASSED",
-                "decision": "APPROVED"
-            }
+                "decision": "APPROVED",
+            },
         )
 
         return AuditResponse(status="APPROVED", reason="All checks passed.")
