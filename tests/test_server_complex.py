@@ -9,25 +9,60 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import json
+import os
 import sys
+from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi import Request
+from fastapi.testclient import TestClient
 
 # Inject mock package into sys.path so coreason_validator can be imported
 MOCK_DIR = Path(__file__).parent / "mocks"
 sys.path.insert(0, str(MOCK_DIR))
 
-import pytest  # noqa: E402
-from fastapi import Request  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
 from coreason_veritas.server import app, fail_closed_handler  # noqa: E402
 
-client = TestClient(app)
-TEST_CONTEXT = {"user_id": "test_user", "email": "test@coreason.ai", "groups": [], "scopes": [], "claims": {}}
+TEST_CONTEXT = {
+    "user_id": "test_user",
+    "email": "test@coreason.ai",
+    "groups": [],
+    "scopes": [],
+    "claims": {},
+}
 
 
-def test_high_volume_audit_requests() -> None:
+@pytest.fixture  # type: ignore[misc]
+def client() -> Generator[TestClient, None, None]:
+    """Fixture to provide TestClient with mocked lifespan dependencies."""
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": "dummy_key"}):
+        with (
+            patch("coreason_veritas.server.SignatureValidator") as MockValidator,
+            patch("coreason_veritas.server.IERLogger") as MockLogger,
+        ):
+            # Configure Mock Validator
+            MockValidator.return_value = MagicMock()
+
+            # Configure Mock Logger
+            mock_logger = MockLogger.return_value
+            # app.state.logger will be this instance.
+            # We need to make sure calls to log_event don't fail.
+            # log_event is async.
+            mock_logger.log_event = MagicMock()
+
+            async def async_log(*args: object, **kwargs: object) -> None:
+                return None
+
+            mock_logger.log_event.side_effect = async_log
+
+            with TestClient(app) as test_client:
+                yield test_client
+
+
+def test_high_volume_audit_requests(client: TestClient) -> None:
     """Simulate high volume of mixed valid/invalid requests."""
     iterations = 100
     for i in range(iterations):
@@ -47,14 +82,28 @@ def test_high_volume_audit_requests() -> None:
             assert response.json()["detail"]["status"] == "REJECTED"
 
 
-def test_fail_closed_on_crash() -> None:
+def test_fail_closed_on_crash(client: TestClient) -> None:
     """Verify that if code crashes (raises unexpected exception), it returns 403 (Fail-Closed)."""
 
-    # We simulate a crash by mocking the logger.bind to raise an exception
-    # (since that's called inside the route).
-    with patch("coreason_veritas.server.logger.bind") as mock_bind:
-        mock_bind.side_effect = Exception("Simulated Core Crash")
+    # Simulate a crash by forcing the mocked logger to raise an exception.
+    # The client fixture sets app.state.logger to a MagicMock.
+    mock_logger = cast(MagicMock, app.state.logger)
+    original_side_effect = mock_logger.log_event.side_effect
 
+    # We want log_event to raise an exception when awaited.
+    # Since log_event is async, side_effect should return a coroutine that raises, or be an exception?
+    # If side_effect is an exception, calling the mock raises it immediately (sync).
+    # But log_event is awaited.
+    # If side_effect is an exception, the `await mock()` call will raise it?
+    # No, `await` expects an awaitable.
+    # We need side_effect to be a function that raises?
+    # Or, since it's a Mock, if we set side_effect to Exception, calling it raises.
+    # But the code does `await ier_logger.log_event(...)`.
+    # If `log_event(...)` raises sync, `await` never happens.
+    # This works for simulating a crash *before* await, which is fine for testing crash handling.
+    mock_logger.log_event.side_effect = Exception("Simulated Core Crash")
+
+    try:
         artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123"}
         payload = {"artifact": artifact, "context": TEST_CONTEXT}
         response = client.post("/audit/artifact", json=payload)
@@ -64,6 +113,8 @@ def test_fail_closed_on_crash() -> None:
         data = response.json()
         assert data["detail"]["status"] == "REJECTED"
         assert "Internal Audit Logic Crash" in data["detail"]["reason"]
+    finally:
+        mock_logger.log_event.side_effect = original_side_effect
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
