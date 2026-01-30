@@ -36,6 +36,9 @@ COPY --from=builder /wheels /wheels
 # Install the application wheel
 RUN pip install --no-cache-dir /wheels/*.whl
 
+# Pre-download the Spacy model during the BUILD phase
+RUN python -m spacy download en_core_web_lg
+
 ENV OTEL_SERVICE_NAME=coreason-veritas-svc
 
 CMD ["uvicorn", "coreason_veritas.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
