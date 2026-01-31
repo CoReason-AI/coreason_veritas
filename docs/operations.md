@@ -9,20 +9,22 @@ This guide is for System Operators, Auditors, and Compliance Officers responsibl
 *   **Integration:** Used in `services.project_lock` and `integrations.asset_registry`.
 *   **Lifecycle:** Requires explicit initialization via `coreason_veritas.initialize()`.
 
-### Deployment Mode B: Gateway Proxy
+### Deployment Mode B: Governance Microservice
 
-For environments where Python library injection is not feasible, `coreason_veritas` operates as a standalone Gateway Proxy.
+For environments where Python library injection is not feasible, `coreason_veritas` operates as a standalone Governance Microservice (Sidecar).
 
-*   **Module:** `src/coreason_veritas/main.py`
+*   **Module:** `src/coreason_veritas/server.py`
 *   **Framework:** FastAPI + Uvicorn.
-*   **Endpoints:** Exposes `POST /v1/chat/completions`.
+*   **Endpoints:**
+    *   `POST /audit/artifact`: Validates artifact provenance and enrichment.
+    *   `POST /verify/access`: Checks user authorization.
+    *   `GET /health`: Liveness probe.
 *   **Behavior:**
-    1.  **Anchor:** Intercepts request -> Sanitizes config (Temp=0, Seed=42 (or ENV)).
-    2.  **Proxy:** Forwards to LLM Provider -> Returns response.
+    1.  **Fail-Closed:** Any unhandled exception halts the request with 403 Forbidden.
+    2.  **Singleton State:** Keys and Loggers are initialized once via `lifespan`.
 *   **Configuration:**
-    *   `VERITAS_HOST`: Host to bind (default: `0.0.0.0`).
-    *   `VERITAS_PORT`: Port to bind (default: `8080`).
-    *   `LLM_PROVIDER_URL`: Upstream LLM provider URL.
+    *   `COREASON_SRB_PUBLIC_KEY`: The PEM-encoded public key for signature verification.
+    *   `OTEL_SERVICE_NAME`: Service name for traces (default: `coreason-veritas-svc`).
 
 ## The Immutable Execution Record (IER)
 

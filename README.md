@@ -93,6 +93,27 @@ print(safe_config)
 # }
 ```
 
+### **4. The Governance Microservice**
+
+For environments where Python library injection is not feasible (e.g., Sidecar deployment), `coreason_veritas` provides a standalone FastAPI server that exposes governance logic via REST.
+
+**Features:**
+*   **Fail-Closed Architecture:** Any unhandled exception results in a 403 Forbidden.
+*   **Singleton Management:** Cryptographic keys and OTel exporters are initialized once at startup.
+*   **Endpoints:**
+    *   `GET /health`: Liveness probe.
+    *   `POST /audit/artifact`: Validates `KnowledgeArtifact` against enrichment and provenance policies.
+    *   `POST /verify/access`: Checks user authorization via `PolicyGuard`.
+
+**Running with Docker:**
+
+```sh
+docker run -p 8000:8000 \
+  -e COREASON_SRB_PUBLIC_KEY="<your_pem_key>" \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317" \
+  coreason-veritas:latest
+```
+
 ## Getting Started
 
 ### Prerequisites

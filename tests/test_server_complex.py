@@ -9,25 +9,78 @@
 # Source Code: https://github.com/CoReason-AI/coreason_veritas
 
 import json
+import os
 import sys
+from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
+
+import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import Request
+from fastapi.testclient import TestClient
 
 # Inject mock package into sys.path so coreason_validator can be imported
 MOCK_DIR = Path(__file__).parent / "mocks"
 sys.path.insert(0, str(MOCK_DIR))
 
-import pytest  # noqa: E402
-from fastapi import Request  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
+import coreason_veritas.server  # noqa: E402
 from coreason_veritas.server import app, fail_closed_handler  # noqa: E402
 
-client = TestClient(app)
-TEST_CONTEXT = {"user_id": "test_user", "email": "test@coreason.ai", "groups": [], "scopes": [], "claims": {}}
+TEST_CONTEXT = {
+    "user_id": "test_user",
+    "email": "test@coreason.ai",
+    "groups": [],
+    "scopes": [],
+    "claims": {},
+}
 
 
-def test_high_volume_audit_requests() -> None:
+def generate_valid_pem() -> str:
+    """Generate a valid RSA public key in PEM format."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = key.public_key()
+    pem_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    pem_str = pem_bytes.decode("utf-8")
+    assert isinstance(pem_str, str)
+    return pem_str
+
+
+@pytest.fixture  # type: ignore[misc]
+def client() -> Generator[TestClient, None, None]:
+    """Fixture to provide TestClient with mocked lifespan dependencies."""
+    valid_key = generate_valid_pem()
+
+    # We patch the module attributes directly using patch.object to ensure
+    # the names resolved by lifespan() in coreason_veritas.server are replaced.
+    with patch.dict(os.environ, {"COREASON_SRB_PUBLIC_KEY": valid_key}):
+        with (
+            patch.object(coreason_veritas.server, "SignatureValidator") as MockValidator,
+            patch.object(coreason_veritas.server, "IERLogger") as MockLogger,
+        ):
+            # Configure Mock Validator
+            MockValidator.return_value = MagicMock()
+
+            # Configure Mock Logger
+            mock_logger = MockLogger.return_value
+            # app.state.logger will be this instance.
+            mock_logger.log_event = MagicMock()
+
+            async def async_log(*args: object, **kwargs: object) -> None:
+                return None
+
+            mock_logger.log_event.side_effect = async_log
+
+            with TestClient(app) as test_client:
+                yield test_client
+
+
+def test_high_volume_audit_requests(client: TestClient) -> None:
     """Simulate high volume of mixed valid/invalid requests."""
     iterations = 100
     for i in range(iterations):
@@ -47,14 +100,29 @@ def test_high_volume_audit_requests() -> None:
             assert response.json()["detail"]["status"] == "REJECTED"
 
 
-def test_fail_closed_on_crash() -> None:
+def test_fail_closed_on_crash(client: TestClient) -> None:
     """Verify that if code crashes (raises unexpected exception), it returns 403 (Fail-Closed)."""
 
-    # We simulate a crash by mocking the logger.bind to raise an exception
-    # (since that's called inside the route).
-    with patch("coreason_veritas.server.logger.bind") as mock_bind:
-        mock_bind.side_effect = Exception("Simulated Core Crash")
+    # Simulate a crash by forcing the mocked logger to raise an exception.
+    # The client fixture sets app.state.logger to a MagicMock.
+    mock_logger = cast(MagicMock, app.state.logger)
 
+    # Ensure log_event is a Mock object before accessing side_effect
+    # If patching failed, mock_logger might be a real object.
+    if not isinstance(mock_logger.log_event, MagicMock):
+        # If it's a real function/coroutine (e.g. patching failed), we can't set side_effect.
+        # This assertions helps debug if patching failed.
+        # But if patching works, this block is skipped.
+        # If patching failed, we force a fail here to be explicit.
+        if hasattr(mock_logger.log_event, "side_effect"):
+            pass  # It's a mock
+        else:
+            pytest.fail(f"app.state.logger.log_event is not a Mock: {type(mock_logger.log_event)}")
+
+    original_side_effect = mock_logger.log_event.side_effect
+    mock_logger.log_event.side_effect = Exception("Simulated Core Crash")
+
+    try:
         artifact = {"enrichment_level": "TAGGED", "source_urn": "urn:job:123"}
         payload = {"artifact": artifact, "context": TEST_CONTEXT}
         response = client.post("/audit/artifact", json=payload)
@@ -64,6 +132,8 @@ def test_fail_closed_on_crash() -> None:
         data = response.json()
         assert data["detail"]["status"] == "REJECTED"
         assert "Internal Audit Logic Crash" in data["detail"]["reason"]
+    finally:
+        mock_logger.log_event.side_effect = original_side_effect
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
