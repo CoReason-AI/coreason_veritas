@@ -33,8 +33,9 @@ WORKDIR /home/appuser/app
 # Copy the wheel from the builder stage
 COPY --from=builder /wheels /wheels
 
-# Install the application wheel
-RUN pip install --no-cache-dir /wheels/*.whl
+# Install the application wheel and pre-download the Spacy model
+RUN pip install --no-cache-dir /wheels/*.whl && \
+    python -m spacy download en_core_web_lg
 
 ENV OTEL_SERVICE_NAME=coreason-veritas-svc
 
